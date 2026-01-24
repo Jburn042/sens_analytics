@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Streamlit secrets (never commit actual secrets)
+.streamlit/secrets.toml
+
+# Raw data (can be regenerated)
+data/raw/
+
+# OS files
+.DS_Store
