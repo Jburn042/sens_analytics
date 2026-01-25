@@ -148,7 +148,8 @@ def fetch_team_stats(season: int) -> pd.DataFrame:
         
         # Remove any header rows or averages
         result = result.dropna(subset=['pp_pct', 'pk_pct'])
-        result = result[~result['team_name'].str.contains('League|Average|NHL|Lg', case=False, na=False)]
+        # Note: Using word boundaries (\b) to avoid matching 'Lg' in 'Calgary'
+        result = result[~result['team_name'].str.contains(r'\bLeague\b|\bAverage\b|\bNHL\b|\bLg\b', case=False, na=False, regex=True)]
         
         print(f"    ✓ {len(result)} teams with PP%/PK%")
         return result
