@@ -902,41 +902,73 @@ def show_trade_simulator(simulator):
     
     available_seasons = simulator.available_seasons
     
+    # Initialize session state for trade simulator selections
+    if 'trade_season_a' not in st.session_state:
+        st.session_state.trade_season_a = available_seasons[0]
+    if 'trade_season_b' not in st.session_state:
+        st.session_state.trade_season_b = available_seasons[0]
+    
     col1, col2 = st.columns(2)
     
     with col1:
         st.subheader("Team A")
         
         # Season selector for player A
-        season_a = st.selectbox("Season for Player A metrics:", available_seasons, key='season_a')
+        season_a = st.selectbox(
+            "Season for Player A metrics:", 
+            available_seasons, 
+            index=available_seasons.index(st.session_state.trade_season_a) if st.session_state.trade_season_a in available_seasons else 0,
+            key='trade_sim_season_a'
+        )
+        st.session_state.trade_season_a = season_a
         
         # Get teams for that season
         teams_a = simulator.get_teams_for_season(season_a)
-        team_a = st.selectbox("Select Team:", teams_a, key='team_a')
+        
+        # Get safe index for team selection
+        team_a_idx = 0
+        if 'trade_team_a' in st.session_state and st.session_state.trade_team_a in teams_a:
+            team_a_idx = teams_a.index(st.session_state.trade_team_a)
+        
+        team_a = st.selectbox("Select Team:", teams_a, index=team_a_idx, key='trade_sim_team_a')
+        st.session_state.trade_team_a = team_a
         
         if team_a:
             players_a = simulator.get_players_for_season(season_a)
             roster_a = players_a[players_a['team'] == team_a].sort_values('icetime', ascending=False)
             player_a_options = [f"{row['name']} ({row['position']}) - {row['icetime']:.0f}min" 
                                for _, row in roster_a.head(25).iterrows()]
-            selected_player_a = st.selectbox("Select Player:", player_a_options, key='player_a')
+            selected_player_a = st.selectbox("Select Player:", player_a_options, key='trade_sim_player_a')
     
     with col2:
         st.subheader("Team B")
         
         # Season selector for player B
-        season_b = st.selectbox("Season for Player B metrics:", available_seasons, key='season_b')
+        season_b = st.selectbox(
+            "Season for Player B metrics:", 
+            available_seasons, 
+            index=available_seasons.index(st.session_state.trade_season_b) if st.session_state.trade_season_b in available_seasons else 0,
+            key='trade_sim_season_b'
+        )
+        st.session_state.trade_season_b = season_b
         
         # Get teams for that season
         teams_b = simulator.get_teams_for_season(season_b)
-        team_b = st.selectbox("Select Team:", teams_b, key='team_b')
+        
+        # Get safe index for team selection  
+        team_b_idx = 0
+        if 'trade_team_b' in st.session_state and st.session_state.trade_team_b in teams_b:
+            team_b_idx = teams_b.index(st.session_state.trade_team_b)
+        
+        team_b = st.selectbox("Select Team:", teams_b, index=team_b_idx, key='trade_sim_team_b')
+        st.session_state.trade_team_b = team_b
         
         if team_b:
             players_b = simulator.get_players_for_season(season_b)
             roster_b = players_b[players_b['team'] == team_b].sort_values('icetime', ascending=False)
             player_b_options = [f"{row['name']} ({row['position']}) - {row['icetime']:.0f}min" 
                                for _, row in roster_b.head(25).iterrows()]
-            selected_player_b = st.selectbox("Select Player:", player_b_options, key='player_b')
+            selected_player_b = st.selectbox("Select Player:", player_b_options, key='trade_sim_player_b')
     
     st.markdown("---")
     

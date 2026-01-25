@@ -14,6 +14,47 @@ from standings_model import StandingsModel
 class RosterSimulator:
     """Simulate trades and analyze impact on team performance"""
     
+    # Mapping from team abbreviations to full team names
+    TEAM_ABBREV_TO_FULL = {
+        'ANA': 'Anaheim Ducks',
+        'ARI': 'Arizona Coyotes',
+        'BOS': 'Boston Bruins',
+        'BUF': 'Buffalo Sabres',
+        'CGY': 'Calgary Flames',
+        'CAR': 'Carolina Hurricanes',
+        'CHI': 'Chicago Blackhawks',
+        'COL': 'Colorado Avalanche',
+        'CBJ': 'Columbus Blue Jackets',
+        'DAL': 'Dallas Stars',
+        'DET': 'Detroit Red Wings',
+        'EDM': 'Edmonton Oilers',
+        'FLA': 'Florida Panthers',
+        'L.A': 'Los Angeles Kings',
+        'LAK': 'Los Angeles Kings',
+        'MIN': 'Minnesota Wild',
+        'MTL': 'Montreal Canadiens',
+        'NSH': 'Nashville Predators',
+        'N.J': 'New Jersey Devils',
+        'NJD': 'New Jersey Devils',
+        'NYI': 'New York Islanders',
+        'NYR': 'New York Rangers',
+        'OTT': 'Ottawa Senators',
+        'PHI': 'Philadelphia Flyers',
+        'PIT': 'Pittsburgh Penguins',
+        'S.J': 'San Jose Sharks',
+        'SJS': 'San Jose Sharks',
+        'SEA': 'Seattle Kraken',
+        'STL': 'St. Louis Blues',
+        'T.B': 'Tampa Bay Lightning',
+        'TBL': 'Tampa Bay Lightning',
+        'TOR': 'Toronto Maple Leafs',
+        'UTA': 'Utah Hockey Club',
+        'VAN': 'Vancouver Canucks',
+        'VGK': 'Vegas Golden Knights',
+        'WSH': 'Washington Capitals',
+        'WPG': 'Winnipeg Jets',
+    }
+    
     def __init__(self, season=2025, standings_model=None):
         self.metrics_list = [
             'net_flurry_xgoals',
@@ -70,6 +111,10 @@ class RosterSimulator:
         season_data = self.player_data_all[self.player_data_all['season'] == season]
         return sorted(season_data['team'].unique())
     
+    def _get_full_team_name(self, team_abbrev):
+        """Convert team abbreviation to full team name for matching with team_season_metrics"""
+        return self.TEAM_ABBREV_TO_FULL.get(team_abbrev, team_abbrev)
+    
 
     def _calculate_scaling_factors(self):
         """
@@ -89,8 +134,10 @@ class RosterSimulator:
             
             if calculated is None:
                 continue
-                
-            actual_row = current_team_data[current_team_data['team_full'].str.contains(team, case=False, na=False)]
+            
+            # Convert abbreviation to full team name for matching
+            team_full = self._get_full_team_name(team)
+            actual_row = current_team_data[current_team_data['team_full'] == team_full]
             if len(actual_row) == 0:
                 continue
             actual = actual_row.iloc[0]
@@ -242,9 +289,10 @@ class RosterSimulator:
         Returns modified team metrics.
         """
         # Get actual team metrics as baseline
+        team_full = self._get_full_team_name(team)
         team_actual = self.team_data[
             (self.team_data['season'] == self.current_season) & 
-            (self.team_data['team_full'].str.contains(team, case=False, na=False))
+            (self.team_data['team_full'] == team_full)
         ]
         
         if len(team_actual) == 0:
@@ -324,10 +372,13 @@ class RosterSimulator:
         if season is None:
             season = self.current_season
         
+        # Convert abbreviation to full team name
+        team_full = self._get_full_team_name(team)
+        
         # Use standings model's precomputed ranks for consistency
         team_result = self.standings_model.df_results[
             (self.standings_model.df_results['season'] == season) &
-            (self.standings_model.df_results['team_full'].str.contains(team, case=False, na=False))
+            (self.standings_model.df_results['team_full'] == team_full)
         ]
         
         if len(team_result) > 0:
@@ -393,17 +444,26 @@ class RosterSimulator:
         player_b = player_b_matches.iloc[0]
         
         # Get actual team metrics from team_season_metrics as baseline (pre-trade)
+        # Convert abbreviations to full team names for matching
+        team_a_full = self._get_full_team_name(team_a)
+        team_b_full = self._get_full_team_name(team_b)
+        
         team_a_data = self.team_data[
             (self.team_data['season'] == self.current_season) & 
-            (self.team_data['team_full'].str.contains(team_a, case=False, na=False))
+            (self.team_data['team_full'] == team_a_full)
         ]
         team_b_data = self.team_data[
             (self.team_data['season'] == self.current_season) & 
-            (self.team_data['team_full'].str.contains(team_b, case=False, na=False))
+            (self.team_data['team_full'] == team_b_full)
         ]
         
         if len(team_a_data) == 0 or len(team_b_data) == 0:
-            return {'success': False, 'error': f'Team data not found for {self.current_season}'}
+            missing = []
+            if len(team_a_data) == 0:
+                missing.append(f"{team_a} ({team_a_full})")
+            if len(team_b_data) == 0:
+                missing.append(f"{team_b} ({team_b_full})")
+            return {'success': False, 'error': f'Team data not found for {self.current_season}: {", ".join(missing)}'}
         
         team_a_metrics_before = {m: team_a_data.iloc[0][m] for m in self.metrics_list}
         team_b_metrics_before = {m: team_b_data.iloc[0][m] for m in self.metrics_list}
