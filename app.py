@@ -446,6 +446,7 @@ def show_standings_team_analysis(model):
             fig.update_layout(height=400)
             st.plotly_chart(fig, use_container_width=True)
 
+@st.fragment
 def show_player_comparison():
     """Player comparison radar chart"""
     st.header("Player Comparison")
@@ -836,6 +837,7 @@ def generate_trade_narrative(result):
         rank_change = team_data['rank_change']
         gains = team_data['gains']
         loses = team_data['loses']
+        rank_context = team_data.get('rank_context', {})
         
         # Calculate changes
         changes = {}
@@ -848,53 +850,78 @@ def generate_trade_narrative(result):
         improvements = [(m, c) for m, c in changes.items() if c['diff'] > 5]
         drops = [(m, c) for m, c in changes.items() if c['diff'] < -5]
         unchanged_weak = [(m, c) for m, c in changes.items() if c['before'] < 25 and abs(c['diff']) < 3]
-        unchanged_strong = [(m, c) for m, c in changes.items() if c['before'] > 75 and abs(c['diff']) < 3]
         
         improvements.sort(key=lambda x: x[1]['diff'], reverse=True)
         drops.sort(key=lambda x: x[1]['diff'])
+        
+        # Calculate net improvement score (sum of percentile changes)
+        total_improvement = sum(c['diff'] for c in changes.values())
+        significant_improvements = len([c for c in changes.values() if c['diff'] > 10])
+        significant_drops = len([c for c in changes.values() if c['diff'] < -10])
         
         # Build narrative
         parts = []
         parts.append(f"**{team_name}** ({rank_before} → {rank_after})")
         
-        # Determine overall impact
+        # Determine overall impact - consider both rank change AND metric improvements
         if rank_change < -3:
             parts.append(f"Trading {loses} for {gains} is a **significant upgrade**.")
         elif rank_change < 0:
-            parts.append(f"Trading {loses} for {gains} provides a **modest improvement**.")
+            parts.append(f"Trading {loses} for {gains} provides a **solid improvement**.")
         elif rank_change == 0:
-            parts.append(f"Trading {loses} for {gains} has **minimal impact** on standings.")
+            # No rank change - but did they actually improve?
+            if total_improvement > 50 and significant_improvements >= 2:
+                # Big improvements but no rank change - explain why
+                team_ahead = rank_context.get('team_ahead')
+                gap = rank_context.get('gap_to_ahead')
+                if team_ahead and gap:
+                    parts.append(f"Trading {loses} for {gains} **significantly improves** the team, but **{team_ahead}** remains {gap:.1f} pts ahead.")
+                else:
+                    parts.append(f"Trading {loses} for {gains} **improves multiple areas**, but not enough to move up.")
+            elif total_improvement > 20:
+                team_ahead = rank_context.get('team_ahead')
+                if team_ahead:
+                    parts.append(f"Trading {loses} for {gains} is a **modest upgrade**, but not enough to catch **{team_ahead}**.")
+                else:
+                    parts.append(f"Trading {loses} for {gains} provides **marginal improvement**.")
+            elif total_improvement < -20:
+                team_behind = rank_context.get('team_behind')
+                if team_behind:
+                    parts.append(f"Trading {loses} for {gains} **weakens** the team, but still ahead of **{team_behind}**.")
+                else:
+                    parts.append(f"Trading {loses} for {gains} is a **slight downgrade**.")
+            else:
+                parts.append(f"Trading {loses} for {gains} is essentially a **lateral move**.")
         elif rank_change <= 3:
-            parts.append(f"Trading {loses} for {gains} results in a **slight decline**.")
+            parts.append(f"Trading {loses} for {gains} results in a **notable decline**.")
         else:
             parts.append(f"Trading {loses} for {gains} causes a **major decline**.")
         
-        # Explain why
+        # Show top improvements
         if improvements:
             top_improvement = improvements[0]
             parts.append(f"• Improves {top_improvement[1]['name']} ({top_improvement[1]['before']:.0f}→{top_improvement[1]['after']:.0f} percentile)")
+            if len(improvements) > 1:
+                second = improvements[1]
+                parts.append(f"• Improves {second[1]['name']} ({second[1]['before']:.0f}→{second[1]['after']:.0f} percentile)")
         
+        # Show top drops
         if drops:
             top_drop = drops[0]
             parts.append(f"• Hurts {top_drop[1]['name']} ({top_drop[1]['before']:.0f}→{top_drop[1]['after']:.0f} percentile)")
         
-        # Key insight about unchanged weaknesses
-        if unchanged_weak and rank_change >= 0:
+        # Key insight about unchanged weaknesses (only if no big improvements)
+        if unchanged_weak and rank_change >= 0 and total_improvement < 30:
             weak_areas = [c['name'] for m, c in unchanged_weak[:2]]
             if weak_areas:
                 parts.append(f"• **Key limitation:** {', '.join(weak_areas)} remains weak ({unchanged_weak[0][1]['before']:.0f}th percentile)")
-        
-        # Key insight about unchanged strengths  
-        if unchanged_strong and rank_change <= 0:
-            strong_areas = [c['name'] for m, c in unchanged_strong[:1]]
-            if strong_areas:
-                parts.append(f"• Already strong in {', '.join(strong_areas)} - diminishing returns")
         
         narratives.append('\n'.join(parts))
     
     return narratives
 
 
+@st.fragment
 def show_trade_simulator(simulator):
     """Trade simulation interface"""
     st.header("Trade Impact Simulator")
@@ -1001,6 +1028,16 @@ def show_trade_simulator(simulator):
                              f"{result['team_a']['rank_before']} -> {result['team_a']['rank_after']}",
                              delta=result['team_a']['rank_change'],
                              delta_color="inverse")
+                    
+                    # Show rank context
+                    ctx_a = result['team_a'].get('rank_context', {})
+                    if ctx_a:
+                        if 'team_ahead' in ctx_a:
+                            gap = ctx_a['gap_to_ahead']
+                            st.caption(f"📈 {gap:.2f} pts behind **{ctx_a['team_ahead']}**")
+                        if 'team_behind' in ctx_a:
+                            gap = ctx_a['gap_to_behind']
+                            st.caption(f"📉 {gap:.2f} pts ahead of **{ctx_a['team_behind']}**")
                 
                 with col2:
                     st.subheader(team_b)
@@ -1010,6 +1047,16 @@ def show_trade_simulator(simulator):
                              f"{result['team_b']['rank_before']} -> {result['team_b']['rank_after']}",
                              delta=result['team_b']['rank_change'],
                              delta_color="inverse")
+                    
+                    # Show rank context
+                    ctx_b = result['team_b'].get('rank_context', {})
+                    if ctx_b:
+                        if 'team_ahead' in ctx_b:
+                            gap = ctx_b['gap_to_ahead']
+                            st.caption(f"📈 {gap:.2f} pts behind **{ctx_b['team_ahead']}**")
+                        if 'team_behind' in ctx_b:
+                            gap = ctx_b['gap_to_behind']
+                            st.caption(f"📉 {gap:.2f} pts ahead of **{ctx_b['team_behind']}**")
                 
                 # Generate narrative explanations
                 st.markdown("---")
@@ -1045,6 +1092,34 @@ def show_trade_simulator(simulator):
                         result['team_b']['percentiles_after'],
                         result['current_season']
                     )
+                
+                # Debug: Show actual metric changes
+                with st.expander("📊 Detailed Metric Changes", expanded=False):
+                    st.markdown("**Raw metric values before and after trade:**")
+                    
+                    debug_col1, debug_col2 = st.columns(2)
+                    
+                    with debug_col1:
+                        st.markdown(f"**{team_a}**")
+                        for metric in result['team_a']['metrics_before'].keys():
+                            before_val = result['team_a']['metrics_before'][metric]
+                            after_val = result['team_a']['metrics_after'][metric]
+                            change = after_val - before_val
+                            pct_before = result['team_a']['percentiles_before'].get(metric, 0)
+                            pct_after = result['team_a']['percentiles_after'].get(metric, 0)
+                            change_symbol = "↑" if change > 0 else "↓" if change < 0 else "="
+                            st.caption(f"{metric}: {before_val:.3f} → {after_val:.3f} ({change_symbol}{abs(change):.3f}) | Pct: {pct_before:.0f}→{pct_after:.0f}")
+                    
+                    with debug_col2:
+                        st.markdown(f"**{team_b}**")
+                        for metric in result['team_b']['metrics_before'].keys():
+                            before_val = result['team_b']['metrics_before'][metric]
+                            after_val = result['team_b']['metrics_after'][metric]
+                            change = after_val - before_val
+                            pct_before = result['team_b']['percentiles_before'].get(metric, 0)
+                            pct_after = result['team_b']['percentiles_after'].get(metric, 0)
+                            change_symbol = "↑" if change > 0 else "↓" if change < 0 else "="
+                            st.caption(f"{metric}: {before_val:.3f} → {after_val:.3f} ({change_symbol}{abs(change):.3f}) | Pct: {pct_before:.0f}→{pct_after:.0f}")
             else:
                 st.error(result['error'])
 

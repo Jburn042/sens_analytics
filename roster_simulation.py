@@ -358,14 +358,72 @@ class RosterSimulator:
         
         return modified_metrics
     
-    def predict_team_rank(self, team_metrics):
-        """Predict team rank from metrics"""
-        if team_metrics is None:
-            return None
+    def predict_team_rank_with_context(self, team_metrics, team_abbrev=None):
+        """
+        Predict team rank from metrics by comparing against all other teams.
+        Returns rank and context about nearby teams.
         
+        This calculates where the team would rank among all teams in the current season
+        based on the model's predictions, which is consistent with how predicted_rank_placement
+        is calculated in the standings model.
+        """
+        if team_metrics is None:
+            return None, {}
+        
+        # Get the raw prediction for the modified team
         metrics_df = pd.DataFrame([team_metrics])
-        prediction = self.model.predict(metrics_df[self.metrics_list])[0]
-        return max(1, min(32, round(prediction)))
+        modified_prediction = self.model.predict(metrics_df[self.metrics_list])[0]
+        
+        # Get all teams' predictions for the current season
+        season_data = self.team_data[self.team_data['season'] == self.current_season].copy()
+        
+        if len(season_data) == 0:
+            return max(1, min(32, round(modified_prediction))), {}
+        
+        # Calculate predictions for all teams
+        season_data['predicted_rank'] = self.model.predict(season_data[self.metrics_list])
+        
+        # Store original prediction for context
+        team_full = self._get_full_team_name(team_abbrev) if team_abbrev else None
+        
+        # Sort by predicted rank (lower prediction = better = rank 1)
+        season_data = season_data.sort_values('predicted_rank').reset_index(drop=True)
+        season_data['rank_placement'] = range(1, len(season_data) + 1)
+        
+        # Find where the modified prediction would rank
+        teams_better = (season_data['predicted_rank'] < modified_prediction).sum()
+        new_rank = teams_better + 1
+        
+        # Build context about nearby teams
+        context = {
+            'predicted_score': modified_prediction,
+        }
+        
+        # Exclude the team being modified from comparisons
+        other_teams = season_data[season_data['team_full'] != team_full] if team_full else season_data
+        
+        # Find team just ahead (if any)
+        if new_rank > 1:
+            teams_ahead = other_teams[other_teams['predicted_rank'] < modified_prediction].sort_values('predicted_rank', ascending=False)
+            if len(teams_ahead) > 0:
+                team_ahead = teams_ahead.iloc[0]
+                context['team_ahead'] = team_ahead['team_full']
+                context['gap_to_ahead'] = modified_prediction - team_ahead['predicted_rank']
+        
+        # Find team just behind (if any)
+        if new_rank < len(season_data):
+            teams_behind = other_teams[other_teams['predicted_rank'] > modified_prediction].sort_values('predicted_rank')
+            if len(teams_behind) > 0:
+                team_behind = teams_behind.iloc[0]
+                context['team_behind'] = team_behind['team_full']
+                context['gap_to_behind'] = team_behind['predicted_rank'] - modified_prediction
+        
+        return new_rank, context
+    
+    def predict_team_rank(self, team_metrics, team_abbrev=None):
+        """Predict team rank (wrapper for backward compatibility)"""
+        rank, _ = self.predict_team_rank_with_context(team_metrics, team_abbrev)
+        return rank
     
     def get_team_predicted_rank(self, team, season=None):
         """Get the precomputed predicted rank for a team from the standings model"""
@@ -478,8 +536,8 @@ class RosterSimulator:
         # Team B: loses player_b, gains player_a
         team_b_metrics_after = self.calculate_trade_impact(team_b, player_b, player_a)
         
-        team_a_rank_after = self.predict_team_rank(team_a_metrics_after)
-        team_b_rank_after = self.predict_team_rank(team_b_metrics_after)
+        team_a_rank_after, team_a_context = self.predict_team_rank_with_context(team_a_metrics_after, team_abbrev=team_a)
+        team_b_rank_after, team_b_context = self.predict_team_rank_with_context(team_b_metrics_after, team_abbrev=team_b)
         
         # Calculate percentiles for before/after metrics (relative to current season)
         team_a_pct_before = self._calculate_metric_percentiles(team_a_metrics_before)
@@ -513,7 +571,8 @@ class RosterSimulator:
                 'metrics_before': team_a_metrics_before,
                 'metrics_after': team_a_metrics_after,
                 'percentiles_before': team_a_pct_before,
-                'percentiles_after': team_a_pct_after
+                'percentiles_after': team_a_pct_after,
+                'rank_context': team_a_context
             },
             'team_b': {
                 'name': team_b,
@@ -525,7 +584,8 @@ class RosterSimulator:
                 'metrics_before': team_b_metrics_before,
                 'metrics_after': team_b_metrics_after,
                 'percentiles_before': team_b_pct_before,
-                'percentiles_after': team_b_pct_after
+                'percentiles_after': team_b_pct_after,
+                'rank_context': team_b_context
             },
             'current_season': self.current_season
         }
