@@ -2,11 +2,15 @@ name: Daily Data Update
 
 on:
   schedule:
-    # Run daily at 6 AM ET (11 AM UTC)
+    # Run daily at 6 AM ET (11 AM UTC) - backup, may not work reliably
     - cron: '0 11 * * *'
   
   # Allow manual trigger
   workflow_dispatch:
+  
+  # External trigger via API (reliable daily updates)
+  repository_dispatch:
+    types: [daily-update]
 
 jobs:
   update-data:
@@ -40,4 +44,4 @@ jobs:
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "chore: Update NHL data"
-          file_pattern: "data/*.csv data/raw/**/*.csv"
+          file_pattern: "data/*.csv"
