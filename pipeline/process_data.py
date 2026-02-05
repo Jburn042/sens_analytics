@@ -13,6 +13,7 @@ from config import (
     SKATER_DATA_DIR,
     STANDINGS_DATA_DIR,
     TEAM_MAPPING,
+    CURRENT_SEASON,
     ensure_directories
 )
 
@@ -30,6 +31,34 @@ def load_and_concat_csvs(directory: Path) -> pd.DataFrame:
     print(f"  Loaded {len(csv_files)} files, {len(df_combined)} total rows")
     
     return df_combined
+
+
+def merge_with_existing(new_data: pd.DataFrame, existing_file: Path, 
+                        season_col: str = 'season') -> pd.DataFrame:
+    """
+    Merge new data with existing data, replacing only current season rows.
+    This preserves historical data while updating the current season.
+    """
+    if not existing_file.exists():
+        print(f"  No existing file, using new data only")
+        return new_data
+    
+    existing_data = pd.read_csv(existing_file)
+    print(f"  Loaded existing data: {len(existing_data)} rows, seasons: {sorted(existing_data[season_col].unique())}")
+    
+    # Remove current season from existing data (we'll replace with new)
+    historical_data = existing_data[existing_data[season_col] != CURRENT_SEASON]
+    print(f"  Historical data (preserved): {len(historical_data)} rows")
+    
+    # Get current season from new data
+    current_season_data = new_data[new_data[season_col] == CURRENT_SEASON]
+    print(f"  Current season data (new): {len(current_season_data)} rows")
+    
+    # Combine historical + new current season
+    merged = pd.concat([historical_data, current_season_data], ignore_index=True)
+    print(f"  Merged total: {len(merged)} rows")
+    
+    return merged
 
 
 def create_team_season_metrics():
@@ -142,10 +171,12 @@ def create_team_season_metrics():
     # Normalize column name
     df_output = df_output.rename(columns={'corsiPercentage': 'corsipercentage'})
     
+    # Merge with existing historical data
+    output_file = DATA_DIR / "team_season_metrics.csv"
+    df_output = merge_with_existing(df_output, output_file, season_col='season')
+    
     # Sort and save
     df_output = df_output.sort_values(['team_full', 'season'])
-    
-    output_file = DATA_DIR / "team_season_metrics.csv"
     df_output.to_csv(output_file, index=False)
     
     print(f"  ✓ Created: team_season_metrics.csv")
@@ -170,6 +201,8 @@ def create_player_data():
     df_all = df_all.sort_values(['season', 'team', 'name'])
     
     all_output_file = DATA_DIR / "player_data_all.csv"
+    df_all = merge_with_existing(df_all, all_output_file, season_col='season')
+    df_all = df_all.sort_values(['season', 'team', 'name'])
     df_all.to_csv(all_output_file, index=False)
     print(f"  ✓ Created: player_data_all.csv ({len(df_all)} rows)")
     
@@ -178,6 +211,8 @@ def create_player_data():
     df_5on5 = df_5on5.sort_values(['season', 'team', 'name'])
     
     output_file = DATA_DIR / "player_data.csv"
+    df_5on5 = merge_with_existing(df_5on5, output_file, season_col='season')
+    df_5on5 = df_5on5.sort_values(['season', 'team', 'name'])
     df_5on5.to_csv(output_file, index=False)
     
     print(f"  ✓ Created: player_data.csv (5on5 only)")
@@ -222,10 +257,13 @@ def create_goalie_data():
     # Rename for consistency
     df_goalies = df_goalies.rename(columns={'team_full': 'team'})
     
+    # Merge with existing historical data
+    output_file = DATA_DIR / "goalie_data.csv"
+    # Rename 'team' column temporarily for merge (it's 'team' in goalie data, not 'team_full')
+    df_goalies = merge_with_existing(df_goalies, output_file, season_col='season')
+    
     # Sort and save
     df_goalies = df_goalies.sort_values(['season', 'team'])
-    
-    output_file = DATA_DIR / "goalie_data.csv"
     df_goalies.to_csv(output_file, index=False)
     
     print(f"  ✓ Created: goalie_data.csv")

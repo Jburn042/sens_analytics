@@ -23,8 +23,11 @@ STANDINGS_DATA_DIR = RAW_DATA_DIR / "standings"
 MONEYPUCK_BASE_URL = "https://moneypuck.com/moneypuck/playerData/seasonSummary"
 
 # Seasons to fetch
-# Note: Season year represents the END year (e.g., 2026 = 2025-26 season)
-SEASONS = [2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026]
+# Note: Season year represents the END year (e.g., 2025 = 2024-25 season)
+# MoneyPuck only provides current season data now (historical returns 403)
+# We only fetch current season; historical data is preserved in the repo
+CURRENT_SEASON = 2025  # The 2024-25 season
+SEASONS = [CURRENT_SEASON]  # Only fetch current season
 
 # Season types
 SEASON_TYPES = ["regular"]  # Can add "playoffs" if needed
