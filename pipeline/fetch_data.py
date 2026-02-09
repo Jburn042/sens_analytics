@@ -192,7 +192,7 @@ def fetch_standings(season: int) -> pd.DataFrame:
         
         df = pd.read_html(StringIO(str(table)))[0]
         
-        # Extract columns
+        # Extract columns - include Shootout and Overtime for regulation wins calculation
         keep_cols = []
         if 'Rk' in df.columns:
             keep_cols.append('Rk')
@@ -206,6 +206,10 @@ def fetch_standings(season: int) -> pd.DataFrame:
         
         if 'Overall' in df.columns:
             keep_cols.append('Overall')
+        if 'Shootout' in df.columns:
+            keep_cols.append('Shootout')
+        if 'Overtime' in df.columns:
+            keep_cols.append('Overtime')
         
         if keep_cols:
             df = df[keep_cols].copy()
@@ -221,20 +225,44 @@ def fetch_standings(season: int) -> pd.DataFrame:
             # Store as START year to match MoneyPuck convention (e.g., 2025 for 2025-26 season)
             df['season'] = season
             
-            # Parse record
+            # Helper to parse W-L records
+            def parse_record(record):
+                try:
+                    parts = str(record).split('-')
+                    return int(parts[0]), int(parts[1]), int(parts[2]) if len(parts) > 2 else 0
+                except:
+                    return 0, 0, 0
+            
+            def parse_wl(wl_str):
+                """Parse W-L string like '4-2' to get wins"""
+                try:
+                    return int(str(wl_str).split('-')[0])
+                except:
+                    return 0
+            
+            # Parse overall record
             if 'record' in df.columns:
-                def parse_record(record):
-                    try:
-                        parts = str(record).split('-')
-                        return int(parts[0]), int(parts[1]), int(parts[2]) if len(parts) > 2 else 0
-                    except:
-                        return 0, 0, 0
-                
                 parsed = df['record'].apply(parse_record)
                 df['wins'] = parsed.apply(lambda x: x[0])
                 df['losses'] = parsed.apply(lambda x: x[1])
                 df['ot_losses'] = parsed.apply(lambda x: x[2])
                 df['points'] = df['wins'] * 2 + df['ot_losses']
+                
+                # Calculate regulation wins (total wins - shootout wins - overtime wins)
+                so_wins = df['Shootout'].apply(parse_wl) if 'Shootout' in df.columns else 0
+                ot_wins = df['Overtime'].apply(parse_wl) if 'Overtime' in df.columns else 0
+                df['regulation_wins'] = df['wins'] - so_wins - ot_wins
+                
+                # Calculate points percentage
+                df['games_played'] = df['wins'] + df['losses'] + df['ot_losses']
+                df['pts_pct'] = df['points'] / (df['games_played'] * 2)
+                
+                # Rank by P% (primary), regulation wins as tiebreaker (secondary)
+                df = df.sort_values(['pts_pct', 'regulation_wins'], ascending=[False, False]).reset_index(drop=True)
+                df['team_rank'] = df.index + 1
+                
+                # Drop temporary columns
+                df = df.drop(columns=['Shootout', 'Overtime'], errors='ignore')
             
             print(f"    ✓ {len(df)} teams")
             return df
