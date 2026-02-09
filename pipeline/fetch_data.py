@@ -143,7 +143,7 @@ def fetch_team_stats(season: int) -> pd.DataFrame:
             'team_name': df[team_col].str.replace('*', '', regex=False).str.strip(),  # Remove playoff indicator
             'pp_pct': pd.to_numeric(df[pp_col], errors='coerce') / 100,  # Convert to decimal
             'pk_pct': pd.to_numeric(df[pk_col], errors='coerce') / 100,
-            'season': season - 1  # Adjust to match MoneyPuck convention
+            'season': season  # Use same year convention as MoneyPuck (ending year)
         })
         
         # Remove any header rows or averages
@@ -214,8 +214,8 @@ def fetch_standings(season: int) -> pd.DataFrame:
             
             df = df.rename(columns=rename_dict)
             
-            # Adjust season to match MoneyPuck convention
-            df['season'] = season - 1
+            # Use same year convention as MoneyPuck (ending year, e.g., 2025 for 2024-25 season)
+            df['season'] = season
             
             # Parse record
             if 'record' in df.columns:
