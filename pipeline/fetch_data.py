@@ -81,16 +81,18 @@ def fetch_team_stats(season: int) -> pd.DataFrame:
     Fetch team stats (PP%, PK%) from Hockey Reference
     
     Args:
-        season: Season year (e.g., 2024 for 2023-24 season)
+        season: Season START year (e.g., 2025 for 2025-26 season) - matches MoneyPuck convention
     
     Returns:
         DataFrame with team PP% and PK%
     """
     from bs4 import Comment
     
-    url = f"https://www.hockey-reference.com/leagues/NHL_{season}.html"
+    # Hockey Reference uses END year in URLs (e.g., NHL_2026.html for 2025-26 season)
+    hr_year = season + 1
+    url = f"https://www.hockey-reference.com/leagues/NHL_{hr_year}.html"
     
-    print(f"  Fetching team stats for {season}...")
+    print(f"  Fetching team stats for {season} (HR year {hr_year})...")
     
     try:
         response = requests.get(url, timeout=30, verify=False)
@@ -143,7 +145,7 @@ def fetch_team_stats(season: int) -> pd.DataFrame:
             'team_name': df[team_col].str.replace('*', '', regex=False).str.strip(),  # Remove playoff indicator
             'pp_pct': pd.to_numeric(df[pp_col], errors='coerce') / 100,  # Convert to decimal
             'pk_pct': pd.to_numeric(df[pk_col], errors='coerce') / 100,
-            'season': season  # Use same year convention as MoneyPuck (ending year)
+            'season': season  # Store as START year to match MoneyPuck convention
         })
         
         # Remove any header rows or averages
@@ -166,14 +168,16 @@ def fetch_standings(season: int) -> pd.DataFrame:
     Fetch team standings from Hockey Reference
     
     Args:
-        season: Season year (e.g., 2024 for 2023-24 season)
+        season: Season START year (e.g., 2025 for 2025-26 season) - matches MoneyPuck convention
     
     Returns:
         DataFrame with team standings
     """
-    url = f"https://www.hockey-reference.com/leagues/NHL_{season}_standings.html"
+    # Hockey Reference uses END year in URLs (e.g., NHL_2026_standings.html for 2025-26 season)
+    hr_year = season + 1
+    url = f"https://www.hockey-reference.com/leagues/NHL_{hr_year}_standings.html"
     
-    print(f"  Fetching standings for {season}...")
+    print(f"  Fetching standings for {season} (HR year {hr_year})...")
     
     try:
         response = requests.get(url, timeout=30, verify=False)
@@ -214,7 +218,7 @@ def fetch_standings(season: int) -> pd.DataFrame:
             
             df = df.rename(columns=rename_dict)
             
-            # Use same year convention as MoneyPuck (ending year, e.g., 2025 for 2024-25 season)
+            # Store as START year to match MoneyPuck convention (e.g., 2025 for 2025-26 season)
             df['season'] = season
             
             # Parse record
