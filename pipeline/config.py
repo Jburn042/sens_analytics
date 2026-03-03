@@ -66,7 +66,7 @@ TEAM_MAPPING = {
     'T.B': 'Tampa Bay Lightning',
     'TBL': 'Tampa Bay Lightning',
     'TOR': 'Toronto Maple Leafs',
-    'UTA': 'Utah Hockey Club',
+    'UTA': 'Utah Mammoth',
     'VAN': 'Vancouver Canucks',
     'VGK': 'Vegas Golden Knights',
     'WPG': 'Winnipeg Jets',
