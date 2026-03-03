@@ -360,30 +360,81 @@ def show_standings_team_analysis(model):
                     st.caption(desc)
                     st.markdown("")
     
-    # ==================== TOP VARIANCE SECTION ====================
+    # ==================== LEAGUE-WIDE STANDINGS TABLE ====================
     st.markdown("---")
-    with st.expander("📉 Top Prediction Variance Cases", expanded=False):
-        top_n = st.slider("Number of teams to show:", 3, 15, 5, key='variance_slider')
+    st.subheader("League-Wide Standings & Metrics")
+    st.caption("Click any column header to sort. Default: Predicted Rank.")
+    
+    # Build table data from model results
+    season_data = model.df_results[model.df_results['season'] == season].copy()
+    
+    if not season_data.empty:
+        # All metrics used in the radar chart
+        all_metrics = list(METRIC_DISPLAY_NAMES.keys())
         
-        variance_cases = model.get_top_variance_cases(season, top_n)
+        table_rows = []
+        for _, row in season_data.iterrows():
+            table_row = {
+                'Team': row['team_full'],
+                'Predicted Rank': int(row['predicted_rank_placement']),
+                'Actual Rank': int(row['team_rank']),
+                'Delta': int(row['ranking_variance']),
+            }
+            for metric in all_metrics:
+                display_name = METRIC_DISPLAY_NAMES[metric]
+                pct_col = f'{metric}_percentile'
+                if metric in row.index and pct_col in row.index:
+                    pct_val = row[pct_col]
+                    raw_val = row[metric]
+                    # Format raw value - all percentages are stored as decimals (0-1)
+                    if metric in ('corsipercentage', 'pp_pct', 'pk_pct'):
+                        raw_str = f"{raw_val * 100:.1f}%"
+                    elif metric in ('save_percentage', 'shooting_percentage'):
+                        raw_str = f"{raw_val:.3f}"
+                    else:
+                        raw_str = f"{raw_val:.1f}"
+                    table_row[display_name] = f"{pct_val:.0f}  ({raw_str})"
+                    table_row[f"_sort_{display_name}"] = pct_val
+            table_rows.append(table_row)
         
-        for i, case in enumerate(variance_cases, 1):
-            with st.container():
-                col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
-                
-                with col1:
-                    st.subheader(f"{i}. {case['team']}")
-                with col2:
-                    st.metric("Actual", case['actual_rank'])
-                with col3:
-                    st.metric("Predicted", case['predicted_rank'])
-                with col4:
-                    variance_val = case['variance']
-                    direction = "better" if variance_val < 0 else "worse"
-                    st.metric("Delta", f"{abs(variance_val)} {direction}")
-                
-                st.markdown(f"**Driver:** {case['driver'].replace('_', ' ').title()} - {format_percentile(case['driver_percentile'])}")
-                st.markdown("---")
+        table_df = pd.DataFrame(table_rows)
+        
+        # Determine sort column from selectbox
+        sortable_metric_names = [METRIC_DISPLAY_NAMES[m] for m in all_metrics if f'_sort_{METRIC_DISPLAY_NAMES[m]}' in table_df.columns]
+        sort_options = ['Predicted Rank', 'Actual Rank', 'Delta'] + sortable_metric_names
+        
+        sort_col = st.selectbox("Sort by:", sort_options, index=0, key='league_table_sort')
+        
+        # Sort the dataframe
+        if sort_col in ('Predicted Rank', 'Actual Rank'):
+            table_df = table_df.sort_values(sort_col, ascending=True)
+        elif sort_col == 'Delta':
+            table_df = table_df.sort_values(sort_col, ascending=True)
+        else:
+            sort_key = f"_sort_{sort_col}"
+            if sort_key in table_df.columns:
+                table_df = table_df.sort_values(sort_key, ascending=False)
+        
+        # Drop hidden sort columns before display
+        display_cols = [c for c in table_df.columns if not c.startswith('_sort_')]
+        table_df = table_df[display_cols].reset_index(drop=True)
+        
+        # Style the Delta column
+        def style_delta(val):
+            if val < 0:
+                return 'color: #2A9D8F'  # green - performing better than predicted
+            elif val > 0:
+                return 'color: #E63946'  # red - performing worse than predicted
+            return ''
+        
+        styled_df = table_df.style.map(style_delta, subset=['Delta'])
+        
+        st.dataframe(
+            styled_df,
+            use_container_width=True,
+            hide_index=True,
+            height=min(len(table_df) * 38 + 40, 1200)
+        )
     
     # ==================== MODEL OVERVIEW SECTION ====================
     with st.expander("🔬 Model Overview", expanded=False):
