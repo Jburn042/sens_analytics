@@ -268,19 +268,33 @@ def show_standings_team_analysis(model):
         
         fig_spider = go.Figure()
         
+        def format_raw_value(metric, raw_val):
+            """Format a raw metric value for display"""
+            if metric in ('corsipercentage', 'pp_pct', 'pk_pct'):
+                return f"{raw_val * 100:.1f}%"
+            elif metric in ('save_percentage', 'shooting_percentage'):
+                return f"{raw_val:.3f}"
+            else:
+                return f"{raw_val:.1f}"
+        
         for idx, selected_team in enumerate(selected_teams):
             team_analysis = model.analyze_team_prediction(selected_team, season)
             if team_analysis:
                 display_names = []
                 percentiles = []
+                hover_texts = []
                 
                 for metric, data in team_analysis['metrics'].items():
-                    display_names.append(METRIC_DISPLAY_NAMES.get(metric, metric.replace('_', ' ').title()))
+                    name = METRIC_DISPLAY_NAMES.get(metric, metric.replace('_', ' ').title())
+                    display_names.append(name)
                     percentiles.append(data['percentile'])
+                    raw_str = format_raw_value(metric, data['value'])
+                    hover_texts.append(f"<b>{name}</b><br>{data['percentile']:.0f}% ({raw_str})")
                 
                 # Close the polygon
                 display_names.append(display_names[0])
                 percentiles.append(percentiles[0])
+                hover_texts.append(hover_texts[0])
                 
                 team_color = colors[idx % len(colors)]
                 
@@ -292,7 +306,8 @@ def show_standings_team_analysis(model):
                     line=dict(width=3, color=team_color),
                     fillcolor=team_color,
                     opacity=0.4,
-                    hovertemplate='<b>%{theta}</b><br>%{r:.0f}th percentile<extra>' + selected_team + '</extra>'
+                    text=hover_texts,
+                    hovertemplate='%{text}<extra>' + selected_team + '</extra>'
                 ))
         
         fig_spider.update_layout(
@@ -363,20 +378,19 @@ def show_standings_team_analysis(model):
     # ==================== LEAGUE-WIDE STANDINGS TABLE ====================
     st.markdown("---")
     st.subheader("League-Wide Standings & Metrics")
-    st.caption("Click any column header to sort. Default: Predicted Rank.")
+    st.caption("Click any column header to sort. Metric columns show percentile (actual value).")
     
     # Build table data from model results
     season_data = model.df_results[model.df_results['season'] == season].copy()
     
     if not season_data.empty:
-        # All metrics used in the radar chart
         all_metrics = list(METRIC_DISPLAY_NAMES.keys())
         
         table_rows = []
         for _, row in season_data.iterrows():
             table_row = {
                 'Team': row['team_full'],
-                'Predicted Rank': int(row['predicted_rank_placement']),
+                'Pred Rank': int(row['predicted_rank_placement']),
                 'Actual Rank': int(row['team_rank']),
                 'Delta': int(row['ranking_variance']),
             }
@@ -384,53 +398,23 @@ def show_standings_team_analysis(model):
                 display_name = METRIC_DISPLAY_NAMES[metric]
                 pct_col = f'{metric}_percentile'
                 if metric in row.index and pct_col in row.index:
-                    pct_val = row[pct_col]
+                    pct_val = int(round(row[pct_col]))
                     raw_val = row[metric]
-                    # Format raw value - all percentages are stored as decimals (0-1)
                     if metric in ('corsipercentage', 'pp_pct', 'pk_pct'):
                         raw_str = f"{raw_val * 100:.1f}%"
                     elif metric in ('save_percentage', 'shooting_percentage'):
                         raw_str = f"{raw_val:.3f}"
                     else:
                         raw_str = f"{raw_val:.1f}"
-                    table_row[display_name] = f"{pct_val:.0f}  ({raw_str})"
-                    table_row[f"_sort_{display_name}"] = pct_val
+                    # Right-align percentile with leading non-breaking spaces for correct string sorting
+                    pct_str = str(pct_val).rjust(3, '\u2007')
+                    table_row[display_name] = f"{pct_str}% ({raw_str})"
             table_rows.append(table_row)
         
-        table_df = pd.DataFrame(table_rows)
-        
-        # Determine sort column from selectbox
-        sortable_metric_names = [METRIC_DISPLAY_NAMES[m] for m in all_metrics if f'_sort_{METRIC_DISPLAY_NAMES[m]}' in table_df.columns]
-        sort_options = ['Predicted Rank', 'Actual Rank', 'Delta'] + sortable_metric_names
-        
-        sort_col = st.selectbox("Sort by:", sort_options, index=0, key='league_table_sort')
-        
-        # Sort the dataframe
-        if sort_col in ('Predicted Rank', 'Actual Rank'):
-            table_df = table_df.sort_values(sort_col, ascending=True)
-        elif sort_col == 'Delta':
-            table_df = table_df.sort_values(sort_col, ascending=True)
-        else:
-            sort_key = f"_sort_{sort_col}"
-            if sort_key in table_df.columns:
-                table_df = table_df.sort_values(sort_key, ascending=False)
-        
-        # Drop hidden sort columns before display
-        display_cols = [c for c in table_df.columns if not c.startswith('_sort_')]
-        table_df = table_df[display_cols].reset_index(drop=True)
-        
-        # Style the Delta column
-        def style_delta(val):
-            if val < 0:
-                return 'color: #2A9D8F'  # green - performing better than predicted
-            elif val > 0:
-                return 'color: #E63946'  # red - performing worse than predicted
-            return ''
-        
-        styled_df = table_df.style.map(style_delta, subset=['Delta'])
+        table_df = pd.DataFrame(table_rows).sort_values('Pred Rank').reset_index(drop=True)
         
         st.dataframe(
-            styled_df,
+            table_df,
             use_container_width=True,
             hide_index=True,
             height=min(len(table_df) * 38 + 40, 1200)
