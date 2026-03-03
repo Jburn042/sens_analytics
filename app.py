@@ -283,6 +283,7 @@ def show_standings_team_analysis(model):
                 display_names = []
                 percentiles = []
                 hover_texts = []
+                label_texts = []
                 
                 for metric, data in team_analysis['metrics'].items():
                     name = METRIC_DISPLAY_NAMES.get(metric, metric.replace('_', ' ').title())
@@ -290,11 +291,13 @@ def show_standings_team_analysis(model):
                     percentiles.append(data['percentile'])
                     raw_str = format_raw_value(metric, data['value'])
                     hover_texts.append(f"<b>{name}</b><br>{data['percentile']:.0f}% ({raw_str})")
+                    label_texts.append(f"{data['percentile']:.0f}% ({raw_str})")
                 
                 # Close the polygon
                 display_names.append(display_names[0])
                 percentiles.append(percentiles[0])
                 hover_texts.append(hover_texts[0])
+                label_texts.append(label_texts[0])
                 
                 team_color = colors[idx % len(colors)]
                 
@@ -307,7 +310,21 @@ def show_standings_team_analysis(model):
                     fillcolor=team_color,
                     opacity=0.4,
                     text=hover_texts,
-                    hovertemplate='%{text}<extra>' + selected_team + '</extra>'
+                    hovertemplate='%{text}<extra>' + selected_team + '</extra>',
+                    textposition='top center',
+                    textfont=dict(size=15, color=team_color),
+                ))
+                
+                # Separate scatter trace for labels (avoids label on the closing point)
+                fig_spider.add_trace(go.Scatterpolar(
+                    r=percentiles[:-1],
+                    theta=display_names[:-1],
+                    mode='text',
+                    text=label_texts[:-1],
+                    textposition='top center',
+                    textfont=dict(size=15, color=team_color),
+                    showlegend=False,
+                    hoverinfo='skip',
                 ))
         
         fig_spider.update_layout(
@@ -332,13 +349,13 @@ def show_standings_team_analysis(model):
             legend=dict(
                 orientation='h',
                 yanchor='bottom',
-                y=-0.15,
+                y=-0.12,
                 xanchor='center',
                 x=0.5,
-                font=dict(size=14)
+                font=dict(size=15)
             ),
-            height=700,
-            margin=dict(t=40, b=100, l=100, r=100),
+            height=900,
+            margin=dict(t=60, b=120, l=120, r=120),
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)'
         )
@@ -380,6 +397,22 @@ def show_standings_team_analysis(model):
     st.subheader("League-Wide Standings & Metrics")
     st.caption("Click any column header to sort. Metric columns show percentile (actual value).")
     
+    # NHL logo URL mapping (team full name -> abbreviation for logo CDN)
+    TEAM_LOGO_ABBREV = {
+        'Anaheim Ducks': 'ANA', 'Arizona Coyotes': 'ARI', 'Boston Bruins': 'BOS',
+        'Buffalo Sabres': 'BUF', 'Calgary Flames': 'CGY', 'Carolina Hurricanes': 'CAR',
+        'Chicago Blackhawks': 'CHI', 'Colorado Avalanche': 'COL', 'Columbus Blue Jackets': 'CBJ',
+        'Dallas Stars': 'DAL', 'Detroit Red Wings': 'DET', 'Edmonton Oilers': 'EDM',
+        'Florida Panthers': 'FLA', 'Los Angeles Kings': 'LAK', 'Minnesota Wild': 'MIN',
+        'Montreal Canadiens': 'MTL', 'Nashville Predators': 'NSH', 'New Jersey Devils': 'NJD',
+        'New York Islanders': 'NYI', 'New York Rangers': 'NYR', 'Ottawa Senators': 'OTT',
+        'Philadelphia Flyers': 'PHI', 'Pittsburgh Penguins': 'PIT', 'San Jose Sharks': 'SJS',
+        'Seattle Kraken': 'SEA', 'St. Louis Blues': 'STL', 'Tampa Bay Lightning': 'TBL',
+        'Toronto Maple Leafs': 'TOR', 'Utah Mammoth': 'UTA', 'Utah Hockey Club': 'UTA',
+        'Vancouver Canucks': 'VAN', 'Vegas Golden Knights': 'VGK', 'Washington Capitals': 'WSH',
+        'Winnipeg Jets': 'WPG',
+    }
+    
     # Build table data from model results
     season_data = model.df_results[model.df_results['season'] == season].copy()
     
@@ -388,8 +421,12 @@ def show_standings_team_analysis(model):
         
         table_rows = []
         for _, row in season_data.iterrows():
+            team_name = row['team_full']
+            abbrev = TEAM_LOGO_ABBREV.get(team_name, 'NHL')
+            logo_url = f"https://assets.nhle.com/logos/nhl/svg/{abbrev}_dark.svg"
             table_row = {
-                'Team': row['team_full'],
+                'Logo': logo_url,
+                'Team': team_name,
                 'Pred Rank': int(row['predicted_rank_placement']),
                 'Actual Rank': int(row['team_rank']),
                 'Delta': int(row['ranking_variance']),
@@ -415,6 +452,9 @@ def show_standings_team_analysis(model):
         
         st.dataframe(
             table_df,
+            column_config={
+                'Logo': st.column_config.ImageColumn('', width='small'),
+            },
             use_container_width=True,
             hide_index=True,
             height=min(len(table_df) * 38 + 40, 1200)
@@ -664,6 +704,36 @@ def show_player_comparison():
         
         fig = go.Figure()
         
+        # Build label texts with percentile% (raw value)
+        def format_player_raw(metric_key, player_row):
+            if metric_key in player_row.index:
+                val = player_row[metric_key]
+                if 'Percentage' in metric_key or 'percentage' in metric_key:
+                    return f"{val:.1f}%"
+                else:
+                    return f"{val:.2f}"
+            return ""
+        
+        p1_labels = []
+        p2_labels = []
+        p1_hovers = []
+        p2_hovers = []
+        for k in metric_keys:
+            name = PLAYER_METRICS[k]['name']
+            p1_pct = p1_percentiles.get(k, 50)
+            p2_pct = p2_percentiles.get(k, 50)
+            p1_raw = format_player_raw(k, p1_5on5.iloc[0]) if not p1_5on5.empty else ""
+            p2_raw = format_player_raw(k, p2_5on5.iloc[0]) if not p2_5on5.empty else ""
+            p1_labels.append(f"{p1_pct:.0f}% ({p1_raw})")
+            p2_labels.append(f"{p2_pct:.0f}% ({p2_raw})")
+            p1_hovers.append(f"<b>{name}</b><br>{p1_pct:.0f}% ({p1_raw})")
+            p2_hovers.append(f"<b>{name}</b><br>{p2_pct:.0f}% ({p2_raw})")
+        
+        p1_labels_closed = p1_labels + [p1_labels[0]]
+        p2_labels_closed = p2_labels + [p2_labels[0]]
+        p1_hovers_closed = p1_hovers + [p1_hovers[0]]
+        p2_hovers_closed = p2_hovers + [p2_hovers[0]]
+        
         # Player 1
         fig.add_trace(go.Scatterpolar(
             r=p1_closed,
@@ -673,7 +743,19 @@ def show_player_comparison():
             line=dict(width=3, color='#E63946'),
             fillcolor='#E63946',
             opacity=0.4,
-            hovertemplate=f'<b>{player1_name}</b> ({team1}, {season1})<br><br>' + '<b>%{theta}</b>: %{r:.0f}th percentile<extra></extra>'
+            text=p1_hovers_closed,
+            hovertemplate='%{text}<extra>' + f'{player1_name}' + '</extra>',
+            textfont=dict(size=15, color='#E63946'),
+        ))
+        fig.add_trace(go.Scatterpolar(
+            r=p1_values,
+            theta=display_names,
+            mode='text',
+            text=p1_labels,
+            textposition='top center',
+            textfont=dict(size=15, color='#E63946'),
+            showlegend=False,
+            hoverinfo='skip',
         ))
         
         # Player 2
@@ -685,7 +767,19 @@ def show_player_comparison():
             line=dict(width=3, color='#457B9D'),
             fillcolor='#457B9D',
             opacity=0.4,
-            hovertemplate=f'<b>{player2_name}</b> ({team2}, {season2})<br><br>' + '<b>%{theta}</b>: %{r:.0f}th percentile<extra></extra>'
+            text=p2_hovers_closed,
+            hovertemplate='%{text}<extra>' + f'{player2_name}' + '</extra>',
+            textfont=dict(size=15, color='#457B9D'),
+        ))
+        fig.add_trace(go.Scatterpolar(
+            r=p2_values,
+            theta=display_names,
+            mode='text',
+            text=p2_labels,
+            textposition='bottom center',
+            textfont=dict(size=15, color='#457B9D'),
+            showlegend=False,
+            hoverinfo='skip',
         ))
         
         fig.update_layout(
@@ -710,13 +804,13 @@ def show_player_comparison():
             legend=dict(
                 orientation='h',
                 yanchor='bottom',
-                y=-0.15,
+                y=-0.12,
                 xanchor='center',
                 x=0.5,
-                font=dict(size=14)
+                font=dict(size=15)
             ),
-            height=700,
-            margin=dict(t=40, b=100, l=100, r=100),
+            height=900,
+            margin=dict(t=60, b=120, l=120, r=120),
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)'
         )
