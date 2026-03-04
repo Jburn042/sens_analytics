@@ -306,6 +306,7 @@ def show_standings_team_analysis(model):
                     theta=display_names,
                     fill='toself',
                     name=selected_team,
+                    legendgroup=selected_team,
                     line=dict(width=3, color=team_color),
                     fillcolor=team_color,
                     opacity=0.4,
@@ -324,6 +325,7 @@ def show_standings_team_analysis(model):
                     textposition='top center',
                     textfont=dict(size=15, color=team_color),
                     showlegend=False,
+                    legendgroup=selected_team,
                     hoverinfo='skip',
                 ))
         
@@ -735,11 +737,13 @@ def show_player_comparison():
         p2_hovers_closed = p2_hovers + [p2_hovers[0]]
         
         # Player 1
+        p1_legend = f"{player1_name} ({season1})"
         fig.add_trace(go.Scatterpolar(
             r=p1_closed,
             theta=display_names_closed,
             fill='toself',
-            name=f"{player1_name} ({season1})",
+            name=p1_legend,
+            legendgroup=p1_legend,
             line=dict(width=3, color='#E63946'),
             fillcolor='#E63946',
             opacity=0.4,
@@ -755,15 +759,18 @@ def show_player_comparison():
             textposition='top center',
             textfont=dict(size=15, color='#E63946'),
             showlegend=False,
+            legendgroup=p1_legend,
             hoverinfo='skip',
         ))
         
         # Player 2
+        p2_legend = f"{player2_name} ({season2})"
         fig.add_trace(go.Scatterpolar(
             r=p2_closed,
             theta=display_names_closed,
             fill='toself',
-            name=f"{player2_name} ({season2})",
+            name=p2_legend,
+            legendgroup=p2_legend,
             line=dict(width=3, color='#457B9D'),
             fillcolor='#457B9D',
             opacity=0.4,
@@ -779,6 +786,7 @@ def show_player_comparison():
             textposition='bottom center',
             textfont=dict(size=15, color='#457B9D'),
             showlegend=False,
+            legendgroup=p2_legend,
             hoverinfo='skip',
         ))
         
