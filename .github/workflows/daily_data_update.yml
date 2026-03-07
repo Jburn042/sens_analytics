@@ -2,8 +2,8 @@ name: Daily Data Update
 
 on:
   schedule:
-    # Run daily at 6 AM ET (11 AM UTC) - backup, may not work reliably
-    - cron: '0 11 * * *'
+    # Run daily at 11:30 AM UTC (6:30 AM EST / 7:30 AM EDT)
+    - cron: '30 11 * * *'
   
   # Allow manual trigger
   workflow_dispatch:
