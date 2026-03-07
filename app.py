@@ -881,7 +881,7 @@ html, body { margin: 0; padding: 0; background: #0E1117; }
   <div class="cat-label" id="label-offense" style="color:#E63946;">OFFENSE</div>
   <div class="cat-label" id="label-grit" style="color:#E9C46A;">GRIT</div>
   <div class="cat-label" id="label-defense" style="color:#457B9D;">DEFENSE</div>
-  <div class="cat-label" id="label-twoway" style="color:#A864CF;">TWO-WAY</div>
+  <div class="cat-label" id="label-twoway" style="color:#2A9D8F;">TWO-WAY</div>
 """
         _ring_after = """</div>
 <script>
@@ -920,7 +920,7 @@ function positionRing() {
   svg.style.display = 'block';
   var sc = svgSz / 2;
   var NS = 'http://www.w3.org/2000/svg';
-  [{s:324,sp:144,c:'#E63946'},{s:108,sp:72,c:'#A864CF'},
+  [{s:324,sp:144,c:'#E63946'},{s:108,sp:72,c:'#2A9D8F'},
    {s:180,sp:108,c:'#457B9D'},{s:288,sp:36,c:'#E9C46A'}]
     .forEach(function(seg) {
       var a1 = (seg.s - 90) * Math.PI / 180;
