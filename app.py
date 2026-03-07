@@ -579,12 +579,14 @@ def show_player_comparison():
     st.markdown("---")
     st.subheader("Select Players to Compare")
     
-    # Helper to get player index (preserves selection when changing season/team)
-    def get_player_index(players_list, stored_key):
+    # Helper to get player index (preserves selection, defaults to OTT)
+    def get_player_index(players_list, stored_key, default=None):
         if stored_key in st.session_state:
             stored_name = st.session_state[stored_key]
             if stored_name in players_list:
                 return players_list.index(stored_name)
+        if default and default in players_list:
+            return players_list.index(default)
         return 0
     
     # Player 1 selection
@@ -596,7 +598,7 @@ def show_player_comparison():
         
         # Get teams for this season
         teams1 = sorted(player_df_all[player_df_all['season'] == season1]['team'].unique())
-        team1_idx = get_player_index(teams1, 'player1_team')
+        team1_idx = get_player_index(teams1, 'player1_team', default='OTT')
         team1 = st.selectbox("Team", teams1, index=team1_idx, key='player1_team')
         
         # Get players for this team/season - preserve player selection across season changes
@@ -612,7 +614,7 @@ def show_player_comparison():
         season2 = st.selectbox("Season", seasons, key='player2_season')
         
         teams2 = sorted(player_df_all[player_df_all['season'] == season2]['team'].unique())
-        team2_idx = get_player_index(teams2, 'player2_team')
+        team2_idx = get_player_index(teams2, 'player2_team', default='OTT')
         team2 = st.selectbox("Team", teams2, index=team2_idx, key='player2_team')
         
         players2 = sorted(player_df_all[(player_df_all['season'] == season2) & (player_df_all['team'] == team2)]['name'].unique())
