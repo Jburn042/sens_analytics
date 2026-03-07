@@ -8,6 +8,8 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import plotly.io as pio
+import streamlit.components.v1 as st_components
 from standings_model import StandingsModel
 from roster_simulation import RosterSimulator
 from load_data import get_data_last_updated, check_data_availability, load_player_data, load_player_data_all
@@ -840,19 +842,119 @@ def show_player_comparison():
             showlegend=True,
             legend=dict(
                 orientation='h',
-                yanchor='bottom',
-                y=-0.12,
+                yanchor='top',
+                y=-0.05,
                 xanchor='center',
                 x=0.5,
                 font=dict(size=15)
             ),
-            height=900,
-            margin=dict(t=60, b=120, l=120, r=120),
+            height=1000,
+            margin=dict(t=140, b=140, l=140, r=140),
             paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)'
+            plot_bgcolor='rgba(0,0,0,0)',
+            dragmode=False,
+            hovermode='closest'
         )
         
-        st.plotly_chart(fig, use_container_width=True)
+        # Render radar chart with category ring via embedded HTML component
+        _chart_inner = pio.to_html(fig, full_html=False, include_plotlyjs='cdn',
+                                   config={'displayModeBar': False, 'scrollZoom': False})
+        _ring_before = """<!DOCTYPE html><html><head>
+<style>
+html, body { margin: 0; padding: 0; background: #0E1117; }
+#wrapper { position: relative; width: 100%; }
+#ring-svg {
+  position: absolute; pointer-events: none; display: none; z-index: 10;
+  overflow: visible;
+}
+.cat-label {
+  position: absolute;
+  font-family: "Source Sans Pro", sans-serif;
+  font-size: 11px; font-weight: 700; letter-spacing: 1.5px;
+  text-transform: uppercase; white-space: nowrap;
+  pointer-events: none; transform: translate(-50%, -50%);
+  display: none; z-index: 11;
+}
+</style></head><body>
+<div id="wrapper">
+  <svg id="ring-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+  <div class="cat-label" id="label-offense" style="color:#E63946;">OFFENSE</div>
+  <div class="cat-label" id="label-grit" style="color:#E9C46A;">GRIT</div>
+  <div class="cat-label" id="label-defense" style="color:#457B9D;">DEFENSE</div>
+  <div class="cat-label" id="label-twoway" style="color:#A864CF;">TWO-WAY</div>
+"""
+        _ring_after = """</div>
+<script>
+function positionRing() {
+  var ticks = document.querySelectorAll('.angularaxistick text');
+  if (!ticks.length) return false;
+  var wr = document.getElementById('wrapper');
+  var wrR = wr.getBoundingClientRect();
+  var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  ticks.forEach(function(t) {
+    var r = t.getBoundingClientRect();
+    minX = Math.min(minX, r.left);  maxX = Math.max(maxX, r.right);
+    minY = Math.min(minY, r.top);   maxY = Math.max(maxY, r.bottom);
+  });
+  var cx = ((minX + maxX) / 2) - wrR.left;
+  var cy = ((minY + maxY) / 2) - wrR.top;
+  var maxR = 0;
+  ticks.forEach(function(t) {
+    var r = t.getBoundingClientRect();
+    [[r.left, r.top], [r.right, r.top], [r.left, r.bottom], [r.right, r.bottom]]
+      .forEach(function(c) {
+        var d = Math.sqrt(Math.pow(c[0] - wrR.left - cx, 2) + Math.pow(c[1] - wrR.top - cy, 2));
+        maxR = Math.max(maxR, d);
+      });
+  });
+  var pad = 18;
+  var arcR = maxR + pad;
+  var sw = 5;
+  var svg = document.getElementById('ring-svg');
+  svg.innerHTML = '';
+  var svgSz = (arcR + sw) * 2;
+  svg.setAttribute('width', svgSz);
+  svg.setAttribute('height', svgSz);
+  svg.style.left = (cx - svgSz / 2) + 'px';
+  svg.style.top = (cy - svgSz / 2) + 'px';
+  svg.style.display = 'block';
+  var sc = svgSz / 2;
+  var NS = 'http://www.w3.org/2000/svg';
+  [{s:324,sp:144,c:'#E63946'},{s:108,sp:72,c:'#A864CF'},
+   {s:180,sp:108,c:'#457B9D'},{s:288,sp:36,c:'#E9C46A'}]
+    .forEach(function(seg) {
+      var a1 = (seg.s - 90) * Math.PI / 180;
+      var a2 = (seg.s + seg.sp - 90) * Math.PI / 180;
+      var x1 = sc + arcR * Math.cos(a1), y1 = sc + arcR * Math.sin(a1);
+      var x2 = sc + arcR * Math.cos(a2), y2 = sc + arcR * Math.sin(a2);
+      var la = seg.sp > 180 ? 1 : 0;
+      var p = document.createElementNS(NS, 'path');
+      p.setAttribute('d','M '+x1+' '+y1+' A '+arcR+' '+arcR+' 0 '+la+' 1 '+x2+' '+y2);
+      p.setAttribute('fill','none');
+      p.setAttribute('stroke', seg.c);
+      p.setAttribute('stroke-width', sw);
+      svg.appendChild(p);
+    });
+  var lr = arcR + 28;
+  [{id:'label-offense',a:36},{id:'label-grit',a:306},
+   {id:'label-defense',a:234},{id:'label-twoway',a:144}]
+    .forEach(function(l) {
+      var el = document.getElementById(l.id);
+      var rad = l.a * Math.PI / 180;
+      el.style.left = (cx + lr * Math.sin(rad)) + 'px';
+      el.style.top = (cy - lr * Math.cos(rad)) + 'px';
+      el.style.display = 'block';
+    });
+  return true;
+}
+setTimeout(function() {
+  var att = 0, iv = setInterval(function() {
+    if (positionRing() || att > 30) clearInterval(iv); att++;
+  }, 200);
+}, 500);
+window.addEventListener('resize', function() { setTimeout(positionRing, 300); });
+</script></body></html>"""
+        st_components.html(_ring_before + _chart_inner + _ring_after, height=1100, scrolling=False)
         
         # Percentile guide
         st.markdown("""
