@@ -32,7 +32,7 @@ jobs:
       
       - name: Install dependencies
         run: |
-          pip install pandas requests beautifulsoup4 lxml
+          pip install pandas requests
       
       - name: Fetch and process data
         working-directory: pipeline
@@ -44,4 +44,4 @@ jobs:
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "chore: Update NHL data"
-          file_pattern: "data/*.csv"
+          file_pattern: "data/*.csv data/last_updated.txt"

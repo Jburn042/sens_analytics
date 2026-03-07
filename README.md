@@ -14,19 +14,19 @@ A Streamlit-based NHL analytics tool for team performance prediction, player com
 
 ### Data Sources
 
-| Source | Data Provided | Convention |
+| Source | Data Provided | Update Speed |
 |--------|--------------|------------|
-| **MoneyPuck** | Player stats, team metrics (5on5, all situations) | START year (2025 = 2025-26 season) |
-| **Hockey Reference** | Standings, PP%, PK% | END year in URLs (NHL_2026.html = 2025-26 season) |
+| **MoneyPuck** | Player stats, team metrics (5on5, all situations) | ~7 AM EST daily |
+| **NHL API** | Standings, PP%, PK% | Minutes after game completion |
 
-**Critical**: MoneyPuck and Hockey Reference use different season year conventions. The pipeline handles this by fetching from `NHL_{season+1}.html` when given a MoneyPuck-style season year.
+Both sources use the **START year** convention (2025 = 2025-26 season). The NHL API uses `seasonId` format `20252026`.
 
 ### Data Flow
 
 ```
-MoneyPuck API ─────────────────┐
-                               ├──► fetch_data.py ──► data/raw/ ──► process_data.py ──► data/*.csv
-Hockey Reference (scraping) ───┘
+MoneyPuck API ────┐
+                  ├──► fetch_data.py ──► data/raw/ ──► process_data.py ──► data/*.csv
+NHL API (JSON) ───┘
 ```
 
 ### Season Convention
@@ -44,7 +44,7 @@ Throughout this codebase, seasons use the **START year** (MoneyPuck convention):
 Location: `.github/workflows/daily_data_update.yml`
 
 **Triggers:**
-1. `schedule`: Cron at 6 AM ET (11:00 UTC) - backup, unreliable on GitHub
+1. `schedule`: Cron at 11:30 UTC (6:30 AM EST / 7:30 AM EDT) - backup, unreliable on GitHub
 2. `workflow_dispatch`: Manual trigger from GitHub Actions UI
 3. `repository_dispatch`: External API trigger (recommended for reliability)
 
@@ -91,9 +91,7 @@ Rankings in `team_season_metrics.csv` are calculated as:
 
 This matches NHL.com's "P%" sorted standings view, which is more accurate mid-season when teams have played different numbers of games.
 
-**Calculation:**
-- `pts_pct = points / (games_played * 2)`
-- `regulation_wins = total_wins - shootout_wins - overtime_wins`
+Both `pointPctg` and `regulationWins` come directly from the NHL API — no manual calculation required.
 
 ---
 
@@ -121,7 +119,7 @@ sens_analytics/
 │   └── standings/
 ├── pipeline/
 │   ├── config.py             # CURRENT_SEASON, team mappings
-│   ├── fetch_data.py         # Fetches from MoneyPuck + Hockey Reference
+│   ├── fetch_data.py         # Fetches from MoneyPuck + NHL API
 │   └── process_data.py       # Transforms raw → processed CSVs
 └── .github/workflows/
     └── daily_data_update.yml # Automated data refresh
@@ -156,12 +154,12 @@ This preserves historical data while updating only the current season.
 
 ### "Team data not found for [year]"
 - Check `CURRENT_SEASON` in `config.py`
-- Verify Hockey Reference URL mapping uses `season + 1`
+- Verify NHL API `seasonId` format is `{season}{season+1}` (e.g., `20252026`)
 - Run pipeline locally: `cd pipeline && python fetch_data.py && python process_data.py`
 
 ### Missing PP%/PK% data
-- Check Hockey Reference scraping in `fetch_team_stats()`
-- Verify regex filters don't accidentally exclude teams (e.g., "Calgary" was once filtered by "Lg" pattern)
+- Check NHL API endpoints: `api.nhle.com/stats/rest/en/team/powerplay` and `.../penaltykill`
+- Verify `seasonId` parameter matches current season
 
 ### GitHub Actions push fails
 1. Check repository Settings → Actions → General → "Read and write permissions"

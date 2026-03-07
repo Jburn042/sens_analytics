@@ -2,7 +2,7 @@
 Configuration for Data Pipeline
 
 This module contains configuration settings for fetching data from MoneyPuck
-and Hockey Reference, storing locally for the Streamlit app.
+and the NHL API, storing locally for the Streamlit app.
 """
 
 import os
