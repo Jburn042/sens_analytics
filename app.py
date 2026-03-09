@@ -582,14 +582,14 @@ def show_player_comparison():
     st.subheader("Select Players to Compare")
     
     # Helper to get player index (preserves selection, defaults to OTT)
-    def get_player_index(players_list, stored_key, default=None):
+    def get_player_index(players_list, stored_key, default=None, default_index=0):
         if stored_key in st.session_state:
             stored_name = st.session_state[stored_key]
             if stored_name in players_list:
                 return players_list.index(stored_name)
         if default and default in players_list:
             return players_list.index(default)
-        return 0
+        return min(default_index, len(players_list) - 1)
     
     # Player 1 selection
     col1, col2 = st.columns(2)
@@ -620,7 +620,7 @@ def show_player_comparison():
         team2 = st.selectbox("Team", teams2, index=team2_idx, key='player2_team')
         
         players2 = sorted(player_df_all[(player_df_all['season'] == season2) & (player_df_all['team'] == team2)]['name'].unique())
-        player2_idx = get_player_index(players2, 'player2_name')
+        player2_idx = get_player_index(players2, 'player2_name', default_index=1)
         player2_name = st.selectbox("Player", players2, index=player2_idx, key='player2_name') if players2 else None
     
     if player1_name and player2_name:
@@ -932,6 +932,7 @@ function positionRing() {
       p.setAttribute('d','M '+x1+' '+y1+' A '+arcR+' '+arcR+' 0 '+la+' 1 '+x2+' '+y2);
       p.setAttribute('fill','none');
       p.setAttribute('stroke', seg.c);
+      p.setAttribute('stroke-opacity', '0.5');
       p.setAttribute('stroke-width', sw);
       svg.appendChild(p);
     });
