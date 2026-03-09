@@ -136,12 +136,23 @@ def check_data_availability() -> dict:
 
 
 def get_data_last_updated() -> str:
-    """Get the timestamp of when data was last updated"""
-    file_path = DATA_DIR / "team_season_metrics.csv"
+    """Get the timestamp of when data was last refreshed by the pipeline"""
+    from datetime import datetime, timezone, timedelta
     
+    timestamp_file = DATA_DIR / "last_updated.txt"
+    if timestamp_file.exists():
+        utc_str = timestamp_file.read_text().strip()
+        try:
+            utc_dt = datetime.fromisoformat(utc_str)
+            et = timezone(timedelta(hours=-5))
+            et_dt = utc_dt.astimezone(et)
+            return et_dt.strftime('%b %d, %Y at %-I:%M %p') + " EST"
+        except ValueError:
+            pass
+    
+    file_path = DATA_DIR / "team_season_metrics.csv"
     if file_path.exists():
-        import datetime
         mtime = file_path.stat().st_mtime
-        return datetime.datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S')
+        return datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S')
     
     return "Unknown"

@@ -1,19 +1,21 @@
 """
-Fetch data from MoneyPuck.com and Hockey Reference
+Fetch data from MoneyPuck.com and NHL API
 
 This script downloads team, skater, and goalie data from MoneyPuck
-and standings from Hockey Reference, saving them locally.
+and standings/team stats from the NHL API, saving them locally.
 """
 
 import requests
 import pandas as pd
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from bs4 import BeautifulSoup
 from io import StringIO
 import time
+import unicodedata
 import warnings
 from config import (
     MONEYPUCK_BASE_URL,
+    DATA_DIR,
     TEAM_DATA_DIR,
     SKATER_DATA_DIR,
     GOALIE_DATA_DIR,
@@ -30,6 +32,12 @@ try:
     warnings.simplefilter('ignore', InsecureRequestWarning)
 except ImportError:
     pass
+
+
+def normalize_team_name(name: str) -> str:
+    """Normalize unicode characters in team names (e.g. Montréal -> Montreal)"""
+    nfkd = unicodedata.normalize('NFKD', name)
+    return ''.join(c for c in nfkd if not unicodedata.combining(c))
 
 
 def fetch_moneypuck_data(data_type: str, season: int, season_type: str = "regular") -> pd.DataFrame:
@@ -78,7 +86,7 @@ def fetch_moneypuck_data(data_type: str, season: int, season_type: str = "regula
 
 def fetch_team_stats(season: int) -> pd.DataFrame:
     """
-    Fetch team stats (PP%, PK%) from Hockey Reference
+    Fetch team stats (PP%, PK%) from NHL API
     
     Args:
         season: Season START year (e.g., 2025 for 2025-26 season) - matches MoneyPuck convention
@@ -86,72 +94,34 @@ def fetch_team_stats(season: int) -> pd.DataFrame:
     Returns:
         DataFrame with team PP% and PK%
     """
-    from bs4 import Comment
+    season_id = f"{season}{season + 1}"
     
-    # Hockey Reference uses END year in URLs (e.g., NHL_2026.html for 2025-26 season)
-    hr_year = season + 1
-    url = f"https://www.hockey-reference.com/leagues/NHL_{hr_year}.html"
+    pp_url = f"https://api.nhle.com/stats/rest/en/team/powerplay?cayenneExp=seasonId={season_id}"
+    pk_url = f"https://api.nhle.com/stats/rest/en/team/penaltykill?cayenneExp=seasonId={season_id}"
     
-    print(f"  Fetching team stats for {season} (HR year {hr_year})...")
+    print(f"  Fetching team stats for {season} (NHL API seasonId {season_id})...")
     
     try:
-        response = requests.get(url, timeout=30, verify=False)
-        response.raise_for_status()
+        pp_resp = requests.get(pp_url, timeout=30)
+        pp_resp.raise_for_status()
+        pp_data = pp_resp.json()['data']
         
-        soup = BeautifulSoup(response.content, 'html.parser')
+        pk_resp = requests.get(pk_url, timeout=30)
+        pk_resp.raise_for_status()
+        pk_data = pk_resp.json()['data']
         
-        # Hockey Reference hides some tables in HTML comments
-        # Search for the stats table in comments
-        table = None
-        comments = soup.find_all(string=lambda text: isinstance(text, Comment))
-        for comment in comments:
-            if 'PP%' in comment and 'PK%' in comment:
-                comment_soup = BeautifulSoup(comment, 'html.parser')
-                table = comment_soup.find('table', {'id': 'stats'})
-                if table:
-                    break
+        pp_df = pd.DataFrame([{
+            'team_name': normalize_team_name(t['teamFullName']),
+            'pp_pct': t['powerPlayPct'],
+        } for t in pp_data])
         
-        if table is None:
-            print(f"    ✗ Stats table not found")
-            return None
+        pk_df = pd.DataFrame([{
+            'team_name': normalize_team_name(t['teamFullName']),
+            'pk_pct': t['penaltyKillPct'],
+        } for t in pk_data])
         
-        df = pd.read_html(StringIO(str(table)))[0]
-        
-        # Flatten multi-level columns
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = ['_'.join(str(c) for c in col).strip('_') for col in df.columns.values]
-        
-        # Find team name column and PP%/PK% columns
-        team_col = None
-        pp_col = None
-        pk_col = None
-        
-        for col in df.columns:
-            col_str = str(col)
-            # Team name is in the second column (contains 'Unnamed: 1')
-            if 'Unnamed: 1_level_0' in col_str and team_col is None:
-                team_col = col
-            if 'PP%' in col_str and 'Special Teams' in col_str:
-                pp_col = col
-            if 'PK%' in col_str and 'Special Teams' in col_str:
-                pk_col = col
-        
-        if team_col is None or pp_col is None or pk_col is None:
-            print(f"    ✗ Could not find required columns. team={team_col}, pp={pp_col}, pk={pk_col}")
-            return None
-        
-        # Extract relevant columns
-        result = pd.DataFrame({
-            'team_name': df[team_col].str.replace('*', '', regex=False).str.strip(),  # Remove playoff indicator
-            'pp_pct': pd.to_numeric(df[pp_col], errors='coerce') / 100,  # Convert to decimal
-            'pk_pct': pd.to_numeric(df[pk_col], errors='coerce') / 100,
-            'season': season  # Store as START year to match MoneyPuck convention
-        })
-        
-        # Remove any header rows or averages
-        result = result.dropna(subset=['pp_pct', 'pk_pct'])
-        # Note: Using word boundaries (\b) to avoid matching 'Lg' in 'Calgary'
-        result = result[~result['team_name'].str.contains(r'\bLeague\b|\bAverage\b|\bNHL\b|\bLg\b', case=False, na=False, regex=True)]
+        result = pp_df.merge(pk_df, on='team_name', how='outer')
+        result['season'] = season
         
         print(f"    ✓ {len(result)} teams with PP%/PK%")
         return result
@@ -165,7 +135,7 @@ def fetch_team_stats(season: int) -> pd.DataFrame:
 
 def fetch_standings(season: int) -> pd.DataFrame:
     """
-    Fetch team standings from Hockey Reference
+    Fetch team standings from NHL API
     
     Args:
         season: Season START year (e.g., 2025 for 2025-26 season) - matches MoneyPuck convention
@@ -173,104 +143,52 @@ def fetch_standings(season: int) -> pd.DataFrame:
     Returns:
         DataFrame with team standings
     """
-    # Hockey Reference uses END year in URLs (e.g., NHL_2026_standings.html for 2025-26 season)
-    hr_year = season + 1
-    url = f"https://www.hockey-reference.com/leagues/NHL_{hr_year}_standings.html"
+    url = "https://api-web.nhle.com/v1/standings/now"
     
-    print(f"  Fetching standings for {season} (HR year {hr_year})...")
+    print(f"  Fetching standings for {season} (NHL API)...")
     
     try:
-        response = requests.get(url, timeout=30, verify=False)
+        response = requests.get(url, timeout=30, allow_redirects=True)
         response.raise_for_status()
         
-        soup = BeautifulSoup(response.content, 'html.parser')
-        table = soup.find('table', {'id': 'expanded_standings'})
+        data = response.json()
+        standings = data['standings']
         
-        if table is None:
-            print(f"    ✗ Table not found")
+        target_season_id = int(f"{season}{season + 1}")
+        standings = [t for t in standings if t['seasonId'] == target_season_id]
+        
+        if not standings:
+            print(f"    ✗ No standings found for seasonId {target_season_id}")
             return None
         
-        df = pd.read_html(StringIO(str(table)))[0]
+        rows = []
+        for t in standings:
+            rows.append({
+                'team_name': normalize_team_name(t['teamName']['default']),
+                'season': season,
+                'wins': t['wins'],
+                'losses': t['losses'],
+                'ot_losses': t['otLosses'],
+                'points': t['points'],
+                'regulation_wins': t['regulationWins'],
+                'games_played': t['gamesPlayed'],
+                'pts_pct': t['pointPctg'],
+                'record': f"{t['wins']}-{t['losses']}-{t['otLosses']}",
+            })
         
-        # Extract columns - include Shootout and Overtime for regulation wins calculation
-        keep_cols = []
-        if 'Rk' in df.columns:
-            keep_cols.append('Rk')
+        df = pd.DataFrame(rows)
         
-        team_col = None
-        for col in df.columns:
-            if 'Unnamed' in str(col):
-                team_col = col
-                keep_cols.append(col)
-                break
+        # Rank by P% (primary), regulation wins as tiebreaker (secondary)
+        df = df.sort_values(['pts_pct', 'regulation_wins'], ascending=[False, False]).reset_index(drop=True)
+        df['team_rank'] = df.index + 1
         
-        if 'Overall' in df.columns:
-            keep_cols.append('Overall')
-        if 'Shootout' in df.columns:
-            keep_cols.append('Shootout')
-        if 'Overtime' in df.columns:
-            keep_cols.append('Overtime')
-        
-        if keep_cols:
-            df = df[keep_cols].copy()
-            
-            rename_dict = {'Rk': 'team_rank'}
-            if team_col:
-                rename_dict[team_col] = 'team_name'
-            if 'Overall' in df.columns:
-                rename_dict['Overall'] = 'record'
-            
-            df = df.rename(columns=rename_dict)
-            
-            # Store as START year to match MoneyPuck convention (e.g., 2025 for 2025-26 season)
-            df['season'] = season
-            
-            # Helper to parse W-L records
-            def parse_record(record):
-                try:
-                    parts = str(record).split('-')
-                    return int(parts[0]), int(parts[1]), int(parts[2]) if len(parts) > 2 else 0
-                except:
-                    return 0, 0, 0
-            
-            def parse_wl(wl_str):
-                """Parse W-L string like '4-2' to get wins"""
-                try:
-                    return int(str(wl_str).split('-')[0])
-                except:
-                    return 0
-            
-            # Parse overall record
-            if 'record' in df.columns:
-                parsed = df['record'].apply(parse_record)
-                df['wins'] = parsed.apply(lambda x: x[0])
-                df['losses'] = parsed.apply(lambda x: x[1])
-                df['ot_losses'] = parsed.apply(lambda x: x[2])
-                df['points'] = df['wins'] * 2 + df['ot_losses']
-                
-                # Calculate regulation wins (total wins - shootout wins - overtime wins)
-                so_wins = df['Shootout'].apply(parse_wl) if 'Shootout' in df.columns else 0
-                ot_wins = df['Overtime'].apply(parse_wl) if 'Overtime' in df.columns else 0
-                df['regulation_wins'] = df['wins'] - so_wins - ot_wins
-                
-                # Calculate points percentage
-                df['games_played'] = df['wins'] + df['losses'] + df['ot_losses']
-                df['pts_pct'] = df['points'] / (df['games_played'] * 2)
-                
-                # Rank by P% (primary), regulation wins as tiebreaker (secondary)
-                df = df.sort_values(['pts_pct', 'regulation_wins'], ascending=[False, False]).reset_index(drop=True)
-                df['team_rank'] = df.index + 1
-                
-                # Drop temporary columns
-                df = df.drop(columns=['Shootout', 'Overtime'], errors='ignore')
-            
-            print(f"    ✓ {len(df)} teams")
-            return df
-        
-        return None
+        print(f"    ✓ {len(df)} teams")
+        return df
         
     except Exception as e:
         print(f"    ✗ Error: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
@@ -301,7 +219,7 @@ def fetch_all():
                 time.sleep(0.5)  # Be nice to the server
     
     # Fetch standings
-    print("\n\n🏆 Hockey Reference Standings")
+    print("\n\n🏆 NHL API Standings")
     print("-" * 40)
     
     all_standings = []
@@ -309,7 +227,7 @@ def fetch_all():
         df = fetch_standings(season)
         if df is not None:
             all_standings.append(df)
-        time.sleep(1)  # Be nice to the server
+        time.sleep(0.5)
     
     if all_standings:
         df_standings = pd.concat(all_standings, ignore_index=True)
@@ -317,7 +235,7 @@ def fetch_all():
         print(f"\n✓ Saved consolidated standings: {len(df_standings)} rows")
     
     # Fetch team stats (PP%, PK%)
-    print("\n\n📈 Hockey Reference Team Stats (PP%, PK%)")
+    print("\n\n📈 NHL API Team Stats (PP%, PK%)")
     print("-" * 40)
     
     all_team_stats = []
@@ -325,12 +243,23 @@ def fetch_all():
         df = fetch_team_stats(season)
         if df is not None:
             all_team_stats.append(df)
-        time.sleep(1)  # Be nice to the server
+        time.sleep(0.5)
     
     if all_team_stats:
         df_team_stats = pd.concat(all_team_stats, ignore_index=True)
         df_team_stats.to_csv(STANDINGS_DATA_DIR / "team_stats_all_seasons.csv", index=False)
         print(f"\n✓ Saved team stats: {len(df_team_stats)} rows")
+    
+    # Write timestamp so the app knows when data was last refreshed
+    now_utc = datetime.now(timezone.utc)
+    est = timezone(timedelta(hours=-5))
+    edt = timezone(timedelta(hours=-4))
+    now_est = now_utc.astimezone(est)
+    now_edt = now_utc.astimezone(edt)
+    
+    timestamp_file = DATA_DIR / "last_updated.txt"
+    timestamp_file.write_text(now_utc.isoformat())
+    print(f"\n✓ Wrote timestamp: {now_utc.isoformat()}")
     
     print("\n" + "=" * 60)
     print("DATA FETCH COMPLETE!")

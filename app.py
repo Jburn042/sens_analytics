@@ -8,6 +8,8 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import plotly.io as pio
+import streamlit.components.v1 as st_components
 from standings_model import StandingsModel
 from roster_simulation import RosterSimulator
 from load_data import get_data_last_updated, check_data_availability, load_player_data, load_player_data_all
@@ -541,24 +543,37 @@ def show_player_comparison():
     player_df_all = player_df_all[player_df_all['games_played'] >= 20].copy()
     player_df_5on5 = player_df_5on5[player_df_5on5['games_played'] >= 20].copy()
     
-    # Player metrics to compare (per 60 minutes where applicable) - calculated from 5on5 data
+    # Player metrics: balanced across offense, defense, two-way, and physical
     PLAYER_METRICS = {
-        'gameScore': {'name': 'Game Score', 'desc': 'Overall game impact rating (5v5)', 'per60': False},
-        'I_F_goals_per60': {'name': 'Goals/60', 'desc': '5v5 goals per 60 minutes', 'per60': True, 'raw': 'I_F_goals'},
-        'I_F_points_per60': {'name': 'Points/60', 'desc': '5v5 points per 60 minutes', 'per60': True, 'raw': 'I_F_points'},
-        'I_F_xGoals_per60': {'name': 'xGoals/60', 'desc': 'Expected goals per 60 minutes', 'per60': True, 'raw': 'I_F_xGoals'},
-        'onIce_xGoalsPercentage': {'name': 'On-Ice xG%', 'desc': 'Expected goals for % when on ice', 'per60': False},
-        'onIce_corsiPercentage': {'name': 'On-Ice Corsi%', 'desc': 'Shot attempt % when on ice', 'per60': False},
-        'I_F_highDangerShots_per60': {'name': 'HD Shots/60', 'desc': 'High-danger shots per 60 min', 'per60': True, 'raw': 'I_F_highDangerShots'},
-        'I_F_hits_per60': {'name': 'Hits/60', 'desc': 'Hits per 60 minutes', 'per60': True, 'raw': 'I_F_hits'},
+        'gameScore': {'name': 'Game Score', 'desc': 'Composite game impact rating (5v5)', 'per60': False, 'category': 'Overall'},
+        'I_F_xGoals_per60': {'name': 'xGoals/60', 'desc': 'Expected goals generated per 60 min', 'per60': True, 'raw': 'I_F_xGoals', 'category': 'Offense'},
+        'I_F_points_per60': {'name': 'Points/60', 'desc': '5v5 points per 60 minutes', 'per60': True, 'raw': 'I_F_points', 'category': 'Offense'},
+        'I_F_highDangerShots_per60': {'name': 'HD Shots/60', 'desc': 'High-danger shots per 60 min', 'per60': True, 'raw': 'I_F_highDangerShots', 'category': 'Offense'},
+        'I_F_hits_per60': {'name': 'Hits/60', 'desc': 'Hits per 60 minutes', 'per60': True, 'raw': 'I_F_hits', 'category': 'Physical'},
+        'takeaway_giveaway_ratio': {'name': 'TA/GA Ratio', 'desc': 'Takeaways per giveaway — puck management', 'per60': False, 'category': 'Defense'},
+        'onIce_xGA_per60': {'name': 'On-Ice xGA/60', 'desc': 'Expected goals against per 60 min when on ice (lower = better)', 'per60': True, 'raw': 'OnIce_A_xGoals', 'inverted': True, 'category': 'Defense'},
+        'onIce_hdA_per60': {'name': 'On-Ice HDA/60', 'desc': 'High-danger chances against per 60 min (lower = better)', 'per60': True, 'raw': 'OnIce_A_highDangerShots', 'inverted': True, 'category': 'Defense'},
+        'onIce_corsiPercentage': {'name': 'On-Ice Corsi%', 'desc': 'Shot attempt share when on ice', 'per60': False, 'category': 'Two-Way'},
+        'onIce_xGoalsPercentage': {'name': 'On-Ice xG%', 'desc': 'Expected goals share when on ice', 'per60': False, 'category': 'Two-Way'},
     }
     
-    # Calculate per-60 metrics on 5on5 data
+    # Calculate per-60 and derived metrics on 5on5 data
     for metric_key, metric_info in PLAYER_METRICS.items():
         if metric_info.get('per60') and 'raw' in metric_info:
             raw_col = metric_info['raw']
             if raw_col in player_df_5on5.columns:
                 player_df_5on5[metric_key] = (player_df_5on5[raw_col] / player_df_5on5['icetime']) * 3600
+    
+    # Takeaway/giveaway ratio (avoid division by zero)
+    if 'I_F_takeaways' in player_df_5on5.columns and 'I_F_giveaways' in player_df_5on5.columns:
+        player_df_5on5['takeaway_giveaway_ratio'] = (
+            player_df_5on5['I_F_takeaways'] / player_df_5on5['I_F_giveaways'].clip(lower=1)
+        )
+    
+    # Add position group column for position-based percentiles
+    player_df_5on5['pos_group'] = player_df_5on5['position'].map(
+        {'C': 'F', 'L': 'F', 'R': 'F', 'D': 'D'}
+    )
     
     # Get available seasons from all-situations data (for selection)
     seasons = sorted(player_df_all['season'].unique(), reverse=True)
@@ -566,13 +581,15 @@ def show_player_comparison():
     st.markdown("---")
     st.subheader("Select Players to Compare")
     
-    # Helper to get player index (preserves selection when changing season/team)
-    def get_player_index(players_list, stored_key):
+    # Helper to get player index (preserves selection, defaults to OTT)
+    def get_player_index(players_list, stored_key, default=None, default_index=0):
         if stored_key in st.session_state:
             stored_name = st.session_state[stored_key]
             if stored_name in players_list:
                 return players_list.index(stored_name)
-        return 0
+        if default and default in players_list:
+            return players_list.index(default)
+        return min(default_index, len(players_list) - 1)
     
     # Player 1 selection
     col1, col2 = st.columns(2)
@@ -583,7 +600,7 @@ def show_player_comparison():
         
         # Get teams for this season
         teams1 = sorted(player_df_all[player_df_all['season'] == season1]['team'].unique())
-        team1_idx = get_player_index(teams1, 'player1_team')
+        team1_idx = get_player_index(teams1, 'player1_team', default='OTT')
         team1 = st.selectbox("Team", teams1, index=team1_idx, key='player1_team')
         
         # Get players for this team/season - preserve player selection across season changes
@@ -599,11 +616,11 @@ def show_player_comparison():
         season2 = st.selectbox("Season", seasons, key='player2_season')
         
         teams2 = sorted(player_df_all[player_df_all['season'] == season2]['team'].unique())
-        team2_idx = get_player_index(teams2, 'player2_team')
+        team2_idx = get_player_index(teams2, 'player2_team', default='OTT')
         team2 = st.selectbox("Team", teams2, index=team2_idx, key='player2_team')
         
         players2 = sorted(player_df_all[(player_df_all['season'] == season2) & (player_df_all['team'] == team2)]['name'].unique())
-        player2_idx = get_player_index(players2, 'player2_name')
+        player2_idx = get_player_index(players2, 'player2_name', default_index=1)
         player2_name = st.selectbox("Player", players2, index=player2_idx, key='player2_name') if players2 else None
     
     if player1_name and player2_name:
@@ -622,26 +639,32 @@ def show_player_comparison():
         p1_all_row = p1_all.iloc[0]
         p2_all_row = p2_all.iloc[0]
         
-        # Calculate percentiles within each player's season (using 5on5 data)
+        # Calculate position-based percentiles (F vs D) with support for inverted metrics
         def get_player_percentiles(player_row, season, metrics):
-            season_df = player_df_5on5[player_df_5on5['season'] == season]
+            pos = player_row.get('pos_group', 'F')
+            season_df = player_df_5on5[
+                (player_df_5on5['season'] == season) & (player_df_5on5['pos_group'] == pos)
+            ]
             percentiles = {}
             for metric_key in metrics:
                 if metric_key in season_df.columns and metric_key in player_row.index:
                     val = player_row[metric_key]
-                    pct = (season_df[metric_key] < val).mean() * 100
+                    if PLAYER_METRICS[metric_key].get('inverted'):
+                        pct = (season_df[metric_key] > val).mean() * 100
+                    else:
+                        pct = (season_df[metric_key] < val).mean() * 100
                     percentiles[metric_key] = pct
-            return percentiles
+            return percentiles, pos
         
         metric_keys = [k for k in PLAYER_METRICS.keys() if k in player_df_5on5.columns]
         
         # Get percentiles (only if 5on5 data exists)
-        p1_percentiles = {}
-        p2_percentiles = {}
+        p1_percentiles, p1_pos = {}, 'F'
+        p2_percentiles, p2_pos = {}, 'F'
         if not p1_5on5.empty:
-            p1_percentiles = get_player_percentiles(p1_5on5.iloc[0], season1, metric_keys)
+            p1_percentiles, p1_pos = get_player_percentiles(p1_5on5.iloc[0], season1, metric_keys)
         if not p2_5on5.empty:
-            p2_percentiles = get_player_percentiles(p2_5on5.iloc[0], season2, metric_keys)
+            p2_percentiles, p2_pos = get_player_percentiles(p2_5on5.iloc[0], season2, metric_keys)
         
         # Display key stats (from ALL-SITUATIONS data = total stats) - compact card layout
         st.markdown("---")
@@ -692,8 +715,14 @@ def show_player_comparison():
         
         # Build radar chart
         st.markdown("---")
-        st.subheader("Performance Radar (League Percentiles)")
-        st.caption("*5v5 (even-strength) metrics - more analytically meaningful than total stats*")
+        st.subheader("Performance Radar (Position Percentiles)")
+        pos_labels = {'F': 'Forwards', 'D': 'Defensemen'}
+        p1_pos_label = pos_labels.get(p1_pos, 'All')
+        p2_pos_label = pos_labels.get(p2_pos, 'All')
+        if p1_pos == p2_pos:
+            st.caption(f"*5v5 metrics — percentiles vs. other {p1_pos_label}*")
+        else:
+            st.caption(f"*5v5 metrics — {player1_name} vs. {p1_pos_label}, {player2_name} vs. {p2_pos_label}*")
         
         display_names = [PLAYER_METRICS[k]['name'] for k in metric_keys]
         p1_values = [p1_percentiles.get(k, 50) for k in metric_keys]
@@ -712,6 +741,8 @@ def show_player_comparison():
                 val = player_row[metric_key]
                 if 'Percentage' in metric_key or 'percentage' in metric_key:
                     return f"{val:.1f}%"
+                elif metric_key == 'takeaway_giveaway_ratio':
+                    return f"{val:.2f}x"
                 else:
                     return f"{val:.2f}"
             return ""
@@ -811,19 +842,120 @@ def show_player_comparison():
             showlegend=True,
             legend=dict(
                 orientation='h',
-                yanchor='bottom',
-                y=-0.12,
+                yanchor='top',
+                y=-0.05,
                 xanchor='center',
                 x=0.5,
                 font=dict(size=15)
             ),
-            height=900,
-            margin=dict(t=60, b=120, l=120, r=120),
+            height=1000,
+            margin=dict(t=140, b=140, l=140, r=140),
             paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)'
+            plot_bgcolor='rgba(0,0,0,0)',
+            dragmode=False,
+            hovermode='closest'
         )
         
-        st.plotly_chart(fig, use_container_width=True)
+        # Render radar chart with category ring via embedded HTML component
+        _chart_inner = pio.to_html(fig, full_html=False, include_plotlyjs='cdn',
+                                   config={'displayModeBar': False, 'scrollZoom': False})
+        _ring_before = """<!DOCTYPE html><html><head>
+<style>
+html, body { margin: 0; padding: 0; background: #0E1117; }
+#wrapper { position: relative; width: 100%; }
+#ring-svg {
+  position: absolute; pointer-events: none; display: none; z-index: 10;
+  overflow: visible;
+}
+.cat-label {
+  position: absolute;
+  font-family: "Source Sans Pro", sans-serif;
+  font-size: 11px; font-weight: 700; letter-spacing: 1.5px;
+  text-transform: uppercase; white-space: nowrap;
+  pointer-events: none; transform: translate(-50%, -50%);
+  display: none; z-index: 11;
+}
+</style></head><body>
+<div id="wrapper">
+  <svg id="ring-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+  <div class="cat-label" id="label-offense" style="color:#E63946;">OFFENSE</div>
+  <div class="cat-label" id="label-grit" style="color:#E9C46A;">GRIT</div>
+  <div class="cat-label" id="label-defense" style="color:#457B9D;">DEFENSE</div>
+  <div class="cat-label" id="label-twoway" style="color:#2A9D8F;">TWO-WAY</div>
+"""
+        _ring_after = """</div>
+<script>
+function positionRing() {
+  var ticks = document.querySelectorAll('.angularaxistick text');
+  if (!ticks.length) return false;
+  var wr = document.getElementById('wrapper');
+  var wrR = wr.getBoundingClientRect();
+  var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  ticks.forEach(function(t) {
+    var r = t.getBoundingClientRect();
+    minX = Math.min(minX, r.left);  maxX = Math.max(maxX, r.right);
+    minY = Math.min(minY, r.top);   maxY = Math.max(maxY, r.bottom);
+  });
+  var cx = ((minX + maxX) / 2) - wrR.left;
+  var cy = ((minY + maxY) / 2) - wrR.top;
+  var maxR = 0;
+  ticks.forEach(function(t) {
+    var r = t.getBoundingClientRect();
+    [[r.left, r.top], [r.right, r.top], [r.left, r.bottom], [r.right, r.bottom]]
+      .forEach(function(c) {
+        var d = Math.sqrt(Math.pow(c[0] - wrR.left - cx, 2) + Math.pow(c[1] - wrR.top - cy, 2));
+        maxR = Math.max(maxR, d);
+      });
+  });
+  var pad = 18;
+  var arcR = maxR + pad;
+  var sw = 5;
+  var svg = document.getElementById('ring-svg');
+  svg.innerHTML = '';
+  var svgSz = (arcR + sw) * 2;
+  svg.setAttribute('width', svgSz);
+  svg.setAttribute('height', svgSz);
+  svg.style.left = (cx - svgSz / 2) + 'px';
+  svg.style.top = (cy - svgSz / 2) + 'px';
+  svg.style.display = 'block';
+  var sc = svgSz / 2;
+  var NS = 'http://www.w3.org/2000/svg';
+  [{s:324,sp:144,c:'#E63946'},{s:108,sp:72,c:'#2A9D8F'},
+   {s:180,sp:108,c:'#457B9D'},{s:288,sp:36,c:'#E9C46A'}]
+    .forEach(function(seg) {
+      var a1 = (seg.s - 90) * Math.PI / 180;
+      var a2 = (seg.s + seg.sp - 90) * Math.PI / 180;
+      var x1 = sc + arcR * Math.cos(a1), y1 = sc + arcR * Math.sin(a1);
+      var x2 = sc + arcR * Math.cos(a2), y2 = sc + arcR * Math.sin(a2);
+      var la = seg.sp > 180 ? 1 : 0;
+      var p = document.createElementNS(NS, 'path');
+      p.setAttribute('d','M '+x1+' '+y1+' A '+arcR+' '+arcR+' 0 '+la+' 1 '+x2+' '+y2);
+      p.setAttribute('fill','none');
+      p.setAttribute('stroke', seg.c);
+      p.setAttribute('stroke-opacity', '0.5');
+      p.setAttribute('stroke-width', sw);
+      svg.appendChild(p);
+    });
+  var lr = arcR + 28;
+  [{id:'label-offense',a:36},{id:'label-grit',a:306},
+   {id:'label-defense',a:234},{id:'label-twoway',a:144}]
+    .forEach(function(l) {
+      var el = document.getElementById(l.id);
+      var rad = l.a * Math.PI / 180;
+      el.style.left = (cx + lr * Math.sin(rad)) + 'px';
+      el.style.top = (cy - lr * Math.cos(rad)) + 'px';
+      el.style.display = 'block';
+    });
+  return true;
+}
+setTimeout(function() {
+  var att = 0, iv = setInterval(function() {
+    if (positionRing() || att > 30) clearInterval(iv); att++;
+  }, 200);
+}, 500);
+window.addEventListener('resize', function() { setTimeout(positionRing, 300); });
+</script></body></html>"""
+        st_components.html(_ring_before + _chart_inner + _ring_after, height=1100, scrolling=False)
         
         # Percentile guide
         st.markdown("""
@@ -835,23 +967,23 @@ def show_player_comparison():
         </div>
         """, unsafe_allow_html=True)
         
-        # Metric definitions
+        # Metric definitions grouped by category
         with st.expander("📊 What do these metrics mean?", expanded=False):
-            col1, col2 = st.columns(2)
-            items = [(PLAYER_METRICS[k]['name'], PLAYER_METRICS[k]['desc']) for k in metric_keys]
-            half = len(items) // 2 + len(items) % 2
+            categories = {}
+            for k in metric_keys:
+                cat = PLAYER_METRICS[k].get('category', 'Other')
+                if cat not in categories:
+                    categories[cat] = []
+                inv_note = " *(inverted: lower raw value = higher percentile)*" if PLAYER_METRICS[k].get('inverted') else ""
+                categories[cat].append((PLAYER_METRICS[k]['name'], PLAYER_METRICS[k]['desc'] + inv_note))
             
-            with col1:
-                for name, desc in items[:half]:
-                    st.markdown(f"**{name}**")
-                    st.caption(desc)
-                    st.markdown("")
+            for cat_name, items in categories.items():
+                st.markdown(f"**{cat_name}**")
+                for name, desc in items:
+                    st.caption(f"  **{name}** — {desc}")
+                st.markdown("")
             
-            with col2:
-                for name, desc in items[half:]:
-                    st.markdown(f"**{name}**")
-                    st.caption(desc)
-                    st.markdown("")
+            st.caption("*Percentiles are calculated within position group (Forwards vs. Defensemen) for fairer comparison.*")
 
 
 # ==================== TRADE SIMULATOR ====================
