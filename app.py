@@ -858,7 +858,7 @@ def show_player_comparison():
         
         # Render radar chart with category ring via embedded HTML component
         _chart_inner = pio.to_html(fig, full_html=False, include_plotlyjs='cdn',
-                                   config={'displayModeBar': False, 'scrollZoom': False})
+                                   config={'displayModeBar': False, 'scrollZoom': False, 'responsive': True})
         _ring_before = """<!DOCTYPE html><html><head>
 <style>
 html, body { margin: 0; padding: 0; background: #0E1117; }
@@ -948,9 +948,12 @@ function positionRing() {
     });
   return true;
 }
-function resizePlot() {
+function relayoutPlot() {
   var gd = document.querySelector('.plotly-graph-div');
-  if (gd && window.Plotly) Plotly.Plots.resize(gd);
+  if (gd && window.Plotly) {
+    Plotly.Plots.resize(gd);
+    Plotly.relayout(gd, {});
+  }
 }
 setTimeout(function() {
   var att = 0, iv = setInterval(function() {
@@ -958,10 +961,9 @@ setTimeout(function() {
     att++;
   }, 200);
 }, 500);
-new ResizeObserver(function() { resizePlot(); positionRing(); })
-  .observe(document.getElementById('wrapper'));
-[1500, 3000, 5000].forEach(function(ms) { setTimeout(function() { resizePlot(); positionRing(); }, ms); });
-window.addEventListener('resize', function() { setTimeout(function() { resizePlot(); positionRing(); }, 300); });
+document.fonts.ready.then(function() { setTimeout(function() { relayoutPlot(); positionRing(); }, 300); });
+[1500, 3000].forEach(function(ms) { setTimeout(function() { relayoutPlot(); positionRing(); }, ms); });
+window.addEventListener('resize', function() { setTimeout(function() { relayoutPlot(); positionRing(); }, 300); });
 </script></body></html>"""
         st_components.html(_ring_before + _chart_inner + _ring_after, height=1100, scrolling=False)
         
