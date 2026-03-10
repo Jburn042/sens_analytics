@@ -950,10 +950,19 @@ function positionRing() {
 }
 setTimeout(function() {
   var att = 0, iv = setInterval(function() {
-    if (positionRing() || att > 30) clearInterval(iv); att++;
+    if (positionRing() || att > 30) {
+      clearInterval(iv);
+      var gd = document.querySelector('.plotly-graph-div');
+      if (gd && window.Plotly) Plotly.Plots.resize(gd);
+    }
+    att++;
   }, 200);
 }, 500);
-window.addEventListener('resize', function() { setTimeout(positionRing, 300); });
+window.addEventListener('resize', function() {
+  setTimeout(positionRing, 300);
+  var gd = document.querySelector('.plotly-graph-div');
+  if (gd && window.Plotly) Plotly.Plots.resize(gd);
+});
 </script></body></html>"""
         st_components.html(_ring_before + _chart_inner + _ring_after, height=1100, scrolling=False)
         
