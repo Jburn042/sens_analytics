@@ -948,21 +948,20 @@ function positionRing() {
     });
   return true;
 }
+function resizePlot() {
+  var gd = document.querySelector('.plotly-graph-div');
+  if (gd && window.Plotly) Plotly.Plots.resize(gd);
+}
 setTimeout(function() {
   var att = 0, iv = setInterval(function() {
-    if (positionRing() || att > 30) {
-      clearInterval(iv);
-      var gd = document.querySelector('.plotly-graph-div');
-      if (gd && window.Plotly) Plotly.Plots.resize(gd);
-    }
+    if (positionRing() || att > 30) clearInterval(iv);
     att++;
   }, 200);
 }, 500);
-window.addEventListener('resize', function() {
-  setTimeout(positionRing, 300);
-  var gd = document.querySelector('.plotly-graph-div');
-  if (gd && window.Plotly) Plotly.Plots.resize(gd);
-});
+new ResizeObserver(function() { resizePlot(); positionRing(); })
+  .observe(document.getElementById('wrapper'));
+[1500, 3000, 5000].forEach(function(ms) { setTimeout(function() { resizePlot(); positionRing(); }, ms); });
+window.addEventListener('resize', function() { setTimeout(function() { resizePlot(); positionRing(); }, 300); });
 </script></body></html>"""
         st_components.html(_ring_before + _chart_inner + _ring_after, height=1100, scrolling=False)
         
