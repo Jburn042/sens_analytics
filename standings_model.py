@@ -16,7 +16,7 @@ class StandingsModel:
     """NHL Standings Prediction Model"""
     
     def __init__(self):
-        # Core metrics used for model predictions (5v5 + special teams)
+        # Core metrics used for model predictions (5v5 only)
         self.metrics_list = [
             'net_flurry_xgoals',
             'net_score_adjusted_shots',
@@ -25,10 +25,17 @@ class StandingsModel:
             'net_high_danger_shots',
             'goals_saved_above_expected',
             'net_high_danger_xgoals',
-            'shooting_percentage',
+            'shooting_percentage'
+        ]
+        
+        # Display-only metrics (not used in model, but shown in radar)
+        self.display_metrics = [
             'pp_pct',
             'pk_pct'
         ]
+        
+        # All metrics for display purposes
+        self.all_display_metrics = self.metrics_list + self.display_metrics
         
         self.metric_descriptions = {
             'net_flurry_xgoals': 'Expected goals differential during high-intensity sequences',
@@ -83,13 +90,19 @@ class StandingsModel:
         
         df['predicted_rank'] = self.model.predict(df[self.metrics_list])
         
+        # Include both model metrics and display-only metrics
         cols_to_include = ['season', 'team_full', 'team_rank', 'predicted_rank'] + self.metrics_list
+        for m in self.display_metrics:
+            if m in df.columns:
+                cols_to_include.append(m)
+        
         df_results = df[cols_to_include].copy()
         
         df_results = df_results.sort_values(by=['season', 'predicted_rank'])
         df_results['predicted_rank_placement'] = df_results.groupby('season').cumcount() + 1
         df_results['ranking_variance'] = df_results['team_rank'] - df_results['predicted_rank_placement']
         
+        # Add analytical columns for model metrics
         for metric in self.metrics_list:
             df_results[f'{metric}_percentile'] = df_results.groupby('season')[metric].rank(pct=True) * 100
             df_results[f'{metric}_zscore'] = df_results.groupby('season')[metric].transform(
@@ -100,6 +113,11 @@ class StandingsModel:
                 self.feature_importances[metric] * 
                 np.sign(df_results['ranking_variance'])
             )
+        
+        # Add percentiles for display-only metrics (no variance contribution)
+        for metric in self.display_metrics:
+            if metric in df_results.columns:
+                df_results[f'{metric}_percentile'] = df_results.groupby('season')[metric].rank(pct=True) * 100
         
         return df_results
     
@@ -165,6 +183,20 @@ class StandingsModel:
                 'description': self.metric_descriptions[metric],
                 'variance_contribution': float(team_row[f'{metric}_variance_contribution'])
             }
+        
+        # Add display-only metrics (PP/PK) - not used in model predictions
+        for metric in self.display_metrics:
+            if metric in team_row.index and f'{metric}_percentile' in team_row.index:
+                display_league_avg = season_data[metric].mean() if metric in season_data.columns else 0
+                analysis['metrics'][metric] = {
+                    'value': float(team_row[metric]),
+                    'league_avg': float(display_league_avg),
+                    'percentile': float(team_row[f'{metric}_percentile']),
+                    'zscore': 0,  # Not calculated for display metrics
+                    'model_weight': 0,  # Not used in model
+                    'description': self.metric_descriptions.get(metric, ''),
+                    'variance_contribution': 0  # Not used in model
+                }
         
         return analysis
     
