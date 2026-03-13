@@ -249,14 +249,12 @@ def show_standings_team_analysis(model):
     if not new_selection:
         new_selection = [teams_for_comparison[0]]
     
-    # If main team changed, update the widget's session state directly
-    if main_team_changed and 'radar_multiselect' in st.session_state:
+    if main_team_changed or 'radar_multiselect' not in st.session_state:
         st.session_state.radar_multiselect = new_selection
-    
+
     selected_teams = st.multiselect(
         "Select teams to compare:",
         teams_for_comparison,
-        default=new_selection,
         max_selections=5,
         key='radar_multiselect'
     )
