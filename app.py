@@ -249,14 +249,12 @@ def show_standings_team_analysis(model):
     if not new_selection:
         new_selection = [teams_for_comparison[0]]
     
-    # If main team changed, update the widget's session state directly
-    if main_team_changed and 'radar_multiselect' in st.session_state:
+    if main_team_changed or 'radar_multiselect' not in st.session_state:
         st.session_state.radar_multiselect = new_selection
-    
+
     selected_teams = st.multiselect(
         "Select teams to compare:",
         teams_for_comparison,
-        default=new_selection,
         max_selections=5,
         key='radar_multiselect'
     )
@@ -376,8 +374,6 @@ def show_standings_team_analysis(model):
         </div>
         """, unsafe_allow_html=True)
         
-        st.caption("*Power Play and Penalty Kill are shown for context but are not used in the prediction model (which focuses on 5v5 play)*")
-        
         # Metric definitions expander
         with st.expander("📊 What do these metrics mean?", expanded=False):
             col1, col2 = st.columns(2)
@@ -486,9 +482,8 @@ def show_standings_team_analysis(model):
         - **Algorithm:** Random Forest Regressor with Grid Search
         - **Training:** 80% train / 20% test split
         - **Cross-Validation:** 5-fold CV
-        - **Features:** 8 hockey performance metrics
+        - **Features:** 10 hockey performance metrics (8 even-strength + PP% and PK%)
         - **Target:** Team standings position (1-32)
-        - **Data:** 5v5 play only
         
         ### Philosophy
         
