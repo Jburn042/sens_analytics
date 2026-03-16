@@ -43,13 +43,21 @@ st.markdown("""
 if not check_password():
     st.stop()
 
+def _get_data_version():
+    """Read the data pipeline timestamp to use as a cache key."""
+    from pathlib import Path
+    ts_file = Path(__file__).parent / "data" / "last_updated.txt"
+    if ts_file.exists():
+        return ts_file.read_text().strip()
+    return "unknown"
+
 @st.cache_resource
-def load_standings_model():
-    """Load the standings model (cached)"""
+def load_standings_model(_data_version):
+    """Load the standings model (cached, invalidates when data updates)"""
     return StandingsModel()
 
 @st.cache_resource
-def load_roster_simulator(_standings_model, season=2025):
+def load_roster_simulator(_standings_model, season=2025, _data_version=None):
     """Load the roster simulator (cached), sharing the standings model"""
     return RosterSimulator(season=season, standings_model=_standings_model)
 
@@ -98,8 +106,9 @@ def run_standings_model():
         return
     
     with st.spinner("Loading models..."):
-        model = load_standings_model()
-        simulator = load_roster_simulator(model)
+        data_version = _get_data_version()
+        model = load_standings_model(data_version)
+        simulator = load_roster_simulator(model, _data_version=data_version)
     
     tab1, tab2, tab3 = st.tabs(["Team Analysis", "Player Comparison", "Trade Simulator"])
     
@@ -394,12 +403,7 @@ def show_standings_team_analysis(model):
                     st.caption(desc)
                     st.markdown("")
     
-    # ==================== LEAGUE-WIDE STANDINGS TABLE ====================
-    st.markdown("---")
-    st.subheader("League-Wide Standings & Metrics")
-    st.caption("Click any column header to sort. Metric columns show percentile (actual value).")
-    
-    # NHL logo URL mapping (team full name -> abbreviation for logo CDN)
+    # NHL logo URL mapping (shared across sections)
     TEAM_LOGO_ABBREV = {
         'Anaheim Ducks': 'ANA', 'Arizona Coyotes': 'ARI', 'Boston Bruins': 'BOS',
         'Buffalo Sabres': 'BUF', 'Calgary Flames': 'CGY', 'Carolina Hurricanes': 'CAR',
@@ -414,6 +418,298 @@ def show_standings_team_analysis(model):
         'Vancouver Canucks': 'VAN', 'Vegas Golden Knights': 'VGK', 'Washington Capitals': 'WSH',
         'Winnipeg Jets': 'WPG',
     }
+
+    # ==================== WHAT-IF SIMULATOR ====================
+    st.markdown("---")
+    st.subheader("What-If Simulator")
+    st.caption(f"Adjust {team}'s metrics to see how their predicted ranking would change.")
+    
+    what_if_metrics = {k: v for k, v in METRIC_DISPLAY_NAMES.items() if k in model.metrics_list}
+    what_if_keys = list(what_if_metrics.keys())
+    
+    def format_whatif_value(metric, val):
+        if metric in ('corsipercentage', 'pp_pct', 'pk_pct'):
+            return f"{val * 100:.1f}%"
+        elif metric in ('save_percentage', 'shooting_percentage'):
+            return f"{val:.3f}"
+        else:
+            return f"{val:.1f}"
+    
+    if 'whatif_count' not in st.session_state:
+        st.session_state.whatif_count = 1
+    
+    def add_metric():
+        if st.session_state.whatif_count < len(what_if_keys):
+            st.session_state.whatif_count += 1
+    
+    def reset_whatif():
+        keys_to_remove = [k for k in st.session_state if k.startswith('whatif_')]
+        for key in keys_to_remove:
+            st.session_state.pop(key, None)
+        st.session_state.whatif_count = 1
+    
+    def remove_metric(idx):
+        count = st.session_state.whatif_count
+        for k in list(st.session_state):
+            if k.startswith(f'whatif_metric_{idx}') or k.startswith(f'whatif_slider_{idx}'):
+                st.session_state.pop(k, None)
+        for j in range(idx + 1, count):
+            for prefix in ['whatif_metric_', 'whatif_slider_']:
+                for k in list(st.session_state):
+                    if k.startswith(f'{prefix}{j}'):
+                        st.session_state.pop(k, None)
+        st.session_state.whatif_count = count - 1
+
+    @st.fragment
+    def whatif_fragment():
+        metric_overrides = {}
+        used_metrics = []
+        
+        for i in range(st.session_state.whatif_count):
+            available = [m for m in what_if_keys if m not in used_metrics]
+            if not available:
+                break
+            
+            col_metric, col_slider, col_remove = st.columns([1, 2, 0.15])
+            
+            with col_metric:
+                selected = st.selectbox(
+                    "Metric" if i == 0 else f"Metric {i + 1}",
+                    available,
+                    format_func=lambda x: what_if_metrics[x],
+                    key=f'whatif_metric_{i}'
+                )
+            
+            current_info = analysis['metrics'].get(selected, {})
+            current_pctl = int(round(current_info.get('percentile', 50)))
+            current_val = current_info.get('value', 0)
+            
+            with col_slider:
+                target_pctl = st.slider(
+                    f"Target percentile (current: {current_pctl}th — {format_whatif_value(selected, current_val)})",
+                    min_value=0,
+                    max_value=100,
+                    value=current_pctl,
+                    step=1,
+                    key=f'whatif_slider_{i}_{selected}'
+                )
+            
+            with col_remove:
+                if i > 0:
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    st.button("✕", key=f'whatif_remove_{i}', on_click=remove_metric, args=(i,))
+            
+            metric_overrides[selected] = target_pctl
+            used_metrics.append(selected)
+        
+        col_add, col_reset, _ = st.columns([1, 1, 3])
+        with col_add:
+            st.button("+ Add Metric", on_click=add_metric,
+                       disabled=st.session_state.whatif_count >= len(what_if_keys))
+        with col_reset:
+            if st.session_state.whatif_count > 1:
+                st.button("Reset", on_click=reset_whatif)
+        
+        result = model.what_if_prediction(team, season, metric_overrides)
+        
+        if result:
+            st.markdown("---")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Current Predicted Rank", result['original_predicted_rank'])
+            with col2:
+                rank_delta = result['rank_change']
+                st.metric(
+                    "What-If Predicted Rank",
+                    result['new_predicted_rank'],
+                    delta=f"{rank_delta:+d} spots" if rank_delta != 0 else "No change",
+                    delta_color="normal"
+                )
+            with col3:
+                score_delta = result['original_score'] - result['new_score']
+                st.metric(
+                    "Model Score",
+                    f"{result['new_score']:.1f}",
+                    delta=f"{score_delta:+.1f} (from {result['original_score']:.1f})",
+                    delta_color="normal",
+                    help="Raw model output (lower = better). Rank only changes when this crosses another team's score."
+                )
+            
+            # Build current vs what-if radar chart
+            current_percentiles = []
+            whatif_percentiles = []
+            radar_names = []
+            current_hover = []
+            whatif_hover = []
+            current_labels = []
+            whatif_labels = []
+            
+            team_analysis = model.analyze_team_prediction(team, season)
+            if team_analysis:
+                for metric_key, data in team_analysis['metrics'].items():
+                    name = METRIC_DISPLAY_NAMES.get(metric_key, metric_key)
+                    radar_names.append(name)
+                    current_percentiles.append(data['percentile'])
+                    raw_str = format_whatif_value(metric_key, data['value'])
+                    current_hover.append(f"<b>{name}</b><br>{data['percentile']:.0f}% ({raw_str})")
+                    current_labels.append(f"{data['percentile']:.0f}% ({raw_str})")
+                    
+                    if metric_key in metric_overrides:
+                        wi_pctl = float(metric_overrides[metric_key])
+                        whatif_percentiles.append(wi_pctl)
+                        whatif_hover.append(f"<b>{name}</b><br>{wi_pctl:.0f}% (adjusted)")
+                        whatif_labels.append(f"{wi_pctl:.0f}%")
+                    else:
+                        whatif_percentiles.append(data['percentile'])
+                        whatif_hover.append(f"<b>{name}</b><br>{data['percentile']:.0f}% ({raw_str})")
+                        whatif_labels.append(f"{data['percentile']:.0f}% ({raw_str})")
+                
+                radar_names_closed = radar_names + [radar_names[0]]
+                current_closed = current_percentiles + [current_percentiles[0]]
+                whatif_closed = whatif_percentiles + [whatif_percentiles[0]]
+                current_hover_closed = current_hover + [current_hover[0]]
+                whatif_hover_closed = whatif_hover + [whatif_hover[0]]
+                current_labels_closed = current_labels + [current_labels[0]]
+                whatif_labels_closed = whatif_labels + [whatif_labels[0]]
+                
+                has_changes = any(abs(c - w) > 0.5 for c, w in zip(current_percentiles, whatif_percentiles))
+                
+                fig_whatif = go.Figure()
+                
+                # Current trace
+                fig_whatif.add_trace(go.Scatterpolar(
+                    r=current_closed,
+                    theta=radar_names_closed,
+                    fill='toself',
+                    name='Current',
+                    legendgroup='Current',
+                    line=dict(width=3, color='#457B9D'),
+                    fillcolor='#457B9D',
+                    opacity=0.4,
+                    text=current_hover_closed,
+                    hovertemplate='%{text}<extra>Current</extra>',
+                    textposition='top center',
+                    textfont=dict(size=15, color='#457B9D'),
+                ))
+                
+                if not has_changes:
+                    # Labels for current only
+                    fig_whatif.add_trace(go.Scatterpolar(
+                        r=current_closed[:-1],
+                        theta=radar_names_closed[:-1],
+                        mode='text',
+                        text=current_labels,
+                        textposition='top center',
+                        textfont=dict(size=15, color='#457B9D'),
+                        showlegend=False,
+                        legendgroup='Current',
+                        hoverinfo='skip',
+                    ))
+                
+                if has_changes:
+                    # What-if trace
+                    fig_whatif.add_trace(go.Scatterpolar(
+                        r=whatif_closed,
+                        theta=radar_names_closed,
+                        fill='toself',
+                        name='What-If',
+                        legendgroup='What-If',
+                        line=dict(width=3, color='#E63946'),
+                        fillcolor='#E63946',
+                        opacity=0.4,
+                        text=whatif_hover_closed,
+                        hovertemplate='%{text}<extra>What-If</extra>',
+                        textposition='top center',
+                        textfont=dict(size=15, color='#E63946'),
+                    ))
+                    
+                    # Labels for what-if
+                    fig_whatif.add_trace(go.Scatterpolar(
+                        r=whatif_closed[:-1],
+                        theta=radar_names_closed[:-1],
+                        mode='text',
+                        text=whatif_labels,
+                        textposition='top center',
+                        textfont=dict(size=15, color='#E63946'),
+                        showlegend=False,
+                        legendgroup='What-If',
+                        hoverinfo='skip',
+                    ))
+                
+                season_display = f"{season - 1}-{str(season)[-2:]}"
+                
+                fig_whatif.update_layout(
+                    polar=dict(
+                        radialaxis=dict(
+                            visible=True,
+                            range=[0, 100],
+                            tickvals=[25, 50, 75, 100],
+                            ticktext=['25%', '50%', '75%', '100%'],
+                            tickfont=dict(size=12, color='gray'),
+                            gridcolor='rgba(128,128,128,0.3)',
+                            linecolor='rgba(128,128,128,0.5)'
+                        ),
+                        angularaxis=dict(
+                            tickfont=dict(size=14, color='white'),
+                            linecolor='rgba(128,128,128,0.5)',
+                            gridcolor='rgba(128,128,128,0.3)'
+                        ),
+                        bgcolor='rgba(0,0,0,0)'
+                    ),
+                    showlegend=True,
+                    legend=dict(
+                        orientation='h',
+                        yanchor='bottom',
+                        y=-0.12,
+                        xanchor='center',
+                        x=0.5,
+                        font=dict(size=15)
+                    ),
+                    height=700,
+                    margin=dict(t=60, b=120, l=120, r=120),
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    dragmode=False,
+                )
+                
+                st.plotly_chart(fig_whatif, use_container_width=True)
+                st.caption(f"*{team} — {season_display}*")
+            
+            if abs(result['rank_change']) > 0:
+                moved = result['all_teams']
+                moved_teams = [t for t in moved if t['original_rank'] != t['new_rank']]
+                moved_teams.sort(key=lambda t: t['new_rank'])
+                
+                st.markdown(f"**League Impact** — {len(moved_teams)} teams affected")
+                impact_rows = []
+                for t in moved_teams:
+                    delta = t['original_rank'] - t['new_rank']
+                    abbrev = TEAM_LOGO_ABBREV.get(t['team'], 'NHL')
+                    logo_url = f"https://assets.nhle.com/logos/nhl/svg/{abbrev}_dark.svg"
+                    impact_rows.append({
+                        'Logo': logo_url,
+                        'Team': t['team'],
+                        'Before': t['original_rank'],
+                        'After': t['new_rank'],
+                        'Change': f"{delta:+d}",
+                    })
+                impact_df = pd.DataFrame(impact_rows)
+                st.dataframe(
+                    impact_df,
+                    column_config={
+                        'Logo': st.column_config.ImageColumn('', width='small'),
+                    },
+                    use_container_width=True,
+                    hide_index=True,
+                    height=min(len(impact_df) * 38 + 40, 600)
+                )
+    
+    whatif_fragment()
+    
+    # ==================== LEAGUE-WIDE STANDINGS TABLE ====================
+    st.markdown("---")
+    st.subheader("League-Wide Standings & Metrics")
+    st.caption("Click any column header to sort. Metric columns show percentile (actual value).")
     
     # Build table data from model results
     season_data = model.df_results[model.df_results['season'] == season].copy()
