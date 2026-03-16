@@ -227,6 +227,75 @@ class StandingsModel:
         
         return results
     
+    def what_if_prediction(self, team_name, season, metric_overrides):
+        """
+        Predict rank with one or more metrics replaced by a target percentile value.
+        
+        Args:
+            team_name: Team full name
+            season: Season year
+            metric_overrides: dict of {metric_name: target_percentile (0-100)}
+        
+        Returns:
+            dict with original and modified predictions, plus per-team rankings
+        """
+        season_data = self.df_results[self.df_results['season'] == season].copy()
+        team_row = season_data[season_data['team_full'] == team_name]
+        
+        if len(team_row) == 0:
+            return None
+        
+        team_idx = team_row.index[0]
+        modified_data = season_data.copy()
+        
+        changes = {}
+        for metric, target_pctl in metric_overrides.items():
+            if metric not in self.metrics_list:
+                continue
+            
+            original_val = float(season_data.loc[team_idx, metric])
+            original_pctl = float(season_data.loc[team_idx, f'{metric}_percentile'])
+            
+            metric_values = season_data[metric].sort_values()
+            target_val = float(np.percentile(metric_values, target_pctl))
+            
+            modified_data.loc[team_idx, metric] = target_val
+            changes[metric] = {
+                'original_value': original_val,
+                'original_percentile': original_pctl,
+                'new_value': target_val,
+                'new_percentile': target_pctl
+            }
+        
+        modified_data['what_if_predicted'] = self.model.predict(modified_data[self.metrics_list])
+        modified_data = modified_data.sort_values('what_if_predicted')
+        modified_data['what_if_rank'] = range(1, len(modified_data) + 1)
+        
+        original_rank = int(season_data.loc[team_idx, 'predicted_rank_placement'])
+        new_rank = int(modified_data.loc[team_idx, 'what_if_rank'])
+        original_score = float(season_data.loc[team_idx, 'predicted_rank'])
+        new_score = float(modified_data.loc[team_idx, 'what_if_predicted'])
+        
+        return {
+            'team': team_name,
+            'original_predicted_rank': original_rank,
+            'new_predicted_rank': new_rank,
+            'rank_change': original_rank - new_rank,
+            'actual_rank': int(season_data.loc[team_idx, 'team_rank']),
+            'original_score': original_score,
+            'new_score': new_score,
+            'changes': changes,
+            'all_teams': [
+                {
+                    'team': row['team_full'],
+                    'original_rank': int(row['predicted_rank_placement']),
+                    'new_rank': int(modified_data.loc[row.name, 'what_if_rank']),
+                    'is_target': row['team_full'] == team_name
+                }
+                for _, row in season_data.iterrows()
+            ]
+        }
+    
     def get_all_teams_for_season(self, season):
         """Get all teams for a specific season"""
         season_data = self.df_results[self.df_results['season'] == season]
