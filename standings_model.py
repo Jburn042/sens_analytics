@@ -256,8 +256,11 @@ class StandingsModel:
             original_val = float(season_data.loc[team_idx, metric])
             original_pctl = float(season_data.loc[team_idx, f'{metric}_percentile'])
             
-            metric_values = season_data[metric].sort_values()
-            target_val = float(np.percentile(metric_values, target_pctl))
+            if round(target_pctl) == round(original_pctl):
+                target_val = original_val
+            else:
+                metric_values = season_data[metric].sort_values()
+                target_val = float(np.percentile(metric_values, target_pctl))
             
             modified_data.loc[team_idx, metric] = target_val
             changes[metric] = {
