@@ -583,13 +583,13 @@ def show_standings_team_analysis(model):
                     fill='toself',
                     name='Current',
                     legendgroup='Current',
-                    line=dict(width=3, color='#457B9D'),
-                    fillcolor='#457B9D',
+                    line=dict(width=3, color='#E63946'),
+                    fillcolor='#E63946',
                     opacity=0.4,
                     text=current_hover_closed,
                     hovertemplate='%{text}<extra>Current</extra>',
                     textposition='top center',
-                    textfont=dict(size=15, color='#457B9D'),
+                    textfont=dict(size=15, color='#E63946'),
                 ))
                 
                 if not has_changes:
@@ -600,7 +600,7 @@ def show_standings_team_analysis(model):
                         mode='text',
                         text=current_labels,
                         textposition='top center',
-                        textfont=dict(size=15, color='#457B9D'),
+                        textfont=dict(size=15, color='#E63946'),
                         showlegend=False,
                         legendgroup='Current',
                         hoverinfo='skip',
@@ -614,13 +614,13 @@ def show_standings_team_analysis(model):
                         fill='toself',
                         name='What-If',
                         legendgroup='What-If',
-                        line=dict(width=3, color='#E63946'),
-                        fillcolor='#E63946',
+                        line=dict(width=3, color='#457B9D'),
+                        fillcolor='#457B9D',
                         opacity=0.4,
                         text=whatif_hover_closed,
                         hovertemplate='%{text}<extra>What-If</extra>',
                         textposition='top center',
-                        textfont=dict(size=15, color='#E63946'),
+                        textfont=dict(size=15, color='#457B9D'),
                     ))
                     
                     # Labels for what-if
@@ -630,7 +630,7 @@ def show_standings_team_analysis(model):
                         mode='text',
                         text=whatif_labels,
                         textposition='top center',
-                        textfont=dict(size=15, color='#E63946'),
+                        textfont=dict(size=15, color='#457B9D'),
                         showlegend=False,
                         legendgroup='What-If',
                         hoverinfo='skip',
