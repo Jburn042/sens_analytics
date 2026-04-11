@@ -665,7 +665,7 @@ def show_standings_team_analysis(model):
                         x=0.5,
                         font=dict(size=15)
                     ),
-                    height=700,
+                    height=900,
                     margin=dict(t=60, b=120, l=120, r=120),
                     paper_bgcolor='rgba(0,0,0,0)',
                     plot_bgcolor='rgba(0,0,0,0)',
