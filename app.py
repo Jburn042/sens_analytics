@@ -2059,7 +2059,7 @@ def show_trade_simulator(simulator):
         if team_a:
             players_a = simulator.get_players_for_season(season_a)
             roster_a = players_a[players_a['team'] == team_a].sort_values('icetime', ascending=False)
-            player_a_options = [f"{row['name']} ({row['position']}) - {row['icetime']:.0f}min" 
+            player_a_options = [f"{row['name']} ({row['position']})" 
                                for _, row in roster_a.head(25).iterrows()]
             selected_player_a = st.selectbox("Select Player:", player_a_options, key='trade_sim_player_a')
     
@@ -2089,7 +2089,7 @@ def show_trade_simulator(simulator):
         if team_b:
             players_b = simulator.get_players_for_season(season_b)
             roster_b = players_b[players_b['team'] == team_b].sort_values('icetime', ascending=False)
-            player_b_options = [f"{row['name']} ({row['position']}) - {row['icetime']:.0f}min" 
+            player_b_options = [f"{row['name']} ({row['position']})" 
                                for _, row in roster_b.head(25).iterrows()]
             selected_player_b = st.selectbox("Select Player:", player_b_options, key='trade_sim_player_b')
     

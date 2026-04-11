@@ -281,98 +281,105 @@ class RosterSimulator:
         
         return metrics
     
+    # Calibrated slopes: how each team metric relates to team-average gameScore/60.
+    # Computed via linear regression across all 32 teams in the current season.
+    # Goalie metrics set to 0 — skater trades don't affect goaltending.
+    GS_METRIC_SLOPES = {
+        'net_flurry_xgoals': 38.501,
+        'net_score_adjusted_shots': 936.774,
+        'corsipercentage': 0.055,
+        'save_percentage': 0.0,
+        'net_high_danger_shots': 46.157,
+        'goals_saved_above_expected': 0.0,
+        'net_high_danger_xgoals': 12.314,
+        'shooting_percentage': 0.004,
+    }
+    # Conversion: total season gameScore delta → predicted score adjustment.
+    # Calibrated from ~27.5 GS per WAR, ~2 standing points per win, and the
+    # observed pred-score spread across 32 teams.  Negative = team improves.
+    GS_TOTAL_COEFF = -0.055
+
+    def _compute_team_gs60(self, team_abbrev, roster_override=None):
+        """Compute ice-time-weighted average gameScore/60 for a team roster."""
+        roster = roster_override if roster_override is not None else self.player_data_all[
+            (self.player_data_all['season'] == self.current_season) &
+            (self.player_data_all['team'] == team_abbrev)
+        ]
+        valid = roster[roster['icetime'] > 0]
+        if len(valid) == 0:
+            return 0.0
+        gs_per60 = valid['gameScore'] / valid['icetime'] * 3600
+        return float(np.average(gs_per60, weights=valid['icetime']))
+
     def calculate_trade_impact(self, team, player_out, player_in):
         """
-        Calculate the impact of swapping one player for another on a team's metrics.
-        Uses actual team data as baseline and calculates delta from player swap.
-        
-        Returns modified team metrics.
+        Estimate trade impact using gameScore as the primary player quality metric.
+
+        Uses total season gameScore (not GS/60 average) to avoid rate-vs-volume
+        dilution.  A star player's full-season production directly translates to
+        team improvement, regardless of roster size.
+
+        Returns (modified_metrics, gs_score_adjustment):
+        - modified_metrics: estimated team metrics after the swap (for radar display)
+        - gs_score_adjustment: predicted-score delta for ranking
         """
-        # Get actual team metrics as baseline
         team_full = self._get_full_team_name(team)
         team_actual = self.team_data[
-            (self.team_data['season'] == self.current_season) & 
+            (self.team_data['season'] == self.current_season) &
             (self.team_data['team_full'] == team_full)
         ]
-        
+
         if len(team_actual) == 0:
-            return None
-            
+            return None, 0.0
+
         baseline_metrics = {m: team_actual.iloc[0][m] for m in self.metrics_list}
-        
-        # Calculate player contribution differences (ice-time weighted)
+
         roster = self.player_data_all[
-            (self.player_data_all['season'] == self.current_season) & 
+            (self.player_data_all['season'] == self.current_season) &
             (self.player_data_all['team'] == team)
         ]
-        
+
         if len(roster) == 0:
-            return baseline_metrics
-            
-        total_icetime = roster['icetime'].sum()
-        
-        # Player out weight
-        out_icetime = player_out['icetime'] if 'icetime' in player_out else 0
-        out_weight = out_icetime / total_icetime if total_icetime > 0 else 0
-        
-        # Player in weight (assume they take similar ice time as player out)
-        in_weight = out_weight
-        
-        # Calculate impact on each metric
+            return baseline_metrics, 0.0
+
+        out_gs = float(player_out.get('gameScore', 0))
+        in_gs = float(player_in.get('gameScore', 0))
+        delta_total_gs = in_gs - out_gs
+
+        # Metric changes for radar display (use GS/60 delta × calibrated slopes)
+        old_gs60 = self._compute_team_gs60(team)
+        new_roster = roster[roster['name'] != player_out.get('name', '')].copy()
+        in_row = player_in.to_frame().T if hasattr(player_in, 'to_frame') else pd.DataFrame([player_in])
+        new_roster = pd.concat([new_roster, in_row], ignore_index=True)
+        delta_gs60 = self._compute_team_gs60(team, new_roster) - old_gs60
+
         modified_metrics = baseline_metrics.copy()
-        
-        metric_columns = {
-            'net_flurry_xgoals': ('OnIce_F_flurryScoreVenueAdjustedxGoals', 'OnIce_A_flurryScoreVenueAdjustedxGoals'),
-            'net_score_adjusted_shots': ('OnIce_F_scoreAdjustedShotsAttempts', 'OnIce_A_scoreAdjustedShotsAttempts'),
-            'net_high_danger_shots': ('OnIce_F_highDangerShots', 'OnIce_A_highDangerShots'),
-            'net_high_danger_xgoals': ('OnIce_F_highDangerxGoals', 'OnIce_A_highDangerxGoals'),
-        }
-        
-        for metric, (col_for, col_against) in metric_columns.items():
-            if col_for in player_out.index and col_for in player_in.index:
-                # Calculate per-minute rates
-                out_rate = (player_out[col_for] - player_out[col_against]) / out_icetime if out_icetime > 0 else 0
-                in_rate = (player_in[col_for] - player_in[col_against]) / player_in['icetime'] if player_in['icetime'] > 0 else 0
-                
-                # Scale to season impact (using out player's ice time as basis)
-                rate_diff = in_rate - out_rate
-                # Scale appropriately - use scaling factors
-                if metric in self.metric_scaling_factors:
-                    impact = rate_diff * out_icetime * self.metric_scaling_factors[metric]
-                else:
-                    impact = rate_diff * out_icetime
-                
-                modified_metrics[metric] = baseline_metrics[metric] + impact
-        
-        # Corsi percentage - weighted average change
-        if 'onIce_corsiPercentage' in player_out.index and 'onIce_corsiPercentage' in player_in.index:
-            corsi_diff = (player_in['onIce_corsiPercentage'] - player_out['onIce_corsiPercentage']) * out_weight
-            modified_metrics['corsipercentage'] = baseline_metrics['corsipercentage'] + corsi_diff
-        
-        # Shooting percentage change
-        if 'I_F_goals' in player_out.index and 'I_F_shotsOnGoal' in player_out.index:
-            out_sh = player_out['I_F_goals'] / player_out['I_F_shotsOnGoal'] if player_out['I_F_shotsOnGoal'] > 0 else 0.08
-            in_sh = player_in['I_F_goals'] / player_in['I_F_shotsOnGoal'] if player_in['I_F_shotsOnGoal'] > 0 else 0.08
-            sh_diff = (in_sh - out_sh) * out_weight
-            modified_metrics['shooting_percentage'] = baseline_metrics['shooting_percentage'] + sh_diff
-        
-        return modified_metrics
+        for metric in self.metrics_list:
+            slope = self.GS_METRIC_SLOPES.get(metric, 0.0)
+            modified_metrics[metric] = baseline_metrics[metric] + slope * delta_gs60
+
+        # Ranking adjustment from total-GS delta (avoids roster-size dilution)
+        gs_score_adjustment = self.GS_TOTAL_COEFF * delta_total_gs
+
+        return modified_metrics, gs_score_adjustment
     
-    def predict_team_rank_with_context(self, team_metrics, team_abbrev=None):
+    def predict_team_rank_with_context(self, team_metrics, team_abbrev=None, score_adjustment=0.0, baseline_metrics=None):
         """
         Predict team rank from metrics by comparing against all other teams.
         Returns rank and context about nearby teams.
         
-        This calculates where the team would rank among all teams in the current season
-        based on the model's predictions, which is consistent with how predicted_rank_placement
-        is calculated in the standings model.
+        score_adjustment: additive adjustment to the predicted score (from gameScore model).
+                          Negative values improve rank, positive values worsen it.
+        baseline_metrics: if provided, use these (not team_metrics) for the model prediction.
+                          This avoids double-counting when team_metrics already reflect GS changes.
         """
         if team_metrics is None:
             return None, {}
         
-        # Get the raw prediction for the modified team
-        metrics_df = pd.DataFrame([team_metrics])
+        pred_input = baseline_metrics if baseline_metrics is not None else team_metrics
+        metrics_df = pd.DataFrame([pred_input])
         modified_prediction = self.model.predict(metrics_df[self.metrics_list])[0]
+        modified_prediction += score_adjustment
         
         # Get all teams' predictions for the current season
         season_data = self.team_data[self.team_data['season'] == self.current_season].copy()
@@ -530,14 +537,17 @@ class RosterSimulator:
         team_a_rank_before = self.get_team_predicted_rank(team_a)
         team_b_rank_before = self.get_team_predicted_rank(team_b)
         
-        # Calculate trade impact using delta method
+        # Calculate trade impact using gameScore-based model
         # Team A: loses player_a, gains player_b
-        team_a_metrics_after = self.calculate_trade_impact(team_a, player_a, player_b)
+        team_a_metrics_after, team_a_gs_adj = self.calculate_trade_impact(team_a, player_a, player_b)
         # Team B: loses player_b, gains player_a
-        team_b_metrics_after = self.calculate_trade_impact(team_b, player_b, player_a)
+        team_b_metrics_after, team_b_gs_adj = self.calculate_trade_impact(team_b, player_b, player_a)
         
-        team_a_rank_after, team_a_context = self.predict_team_rank_with_context(team_a_metrics_after, team_abbrev=team_a)
-        team_b_rank_after, team_b_context = self.predict_team_rank_with_context(team_b_metrics_after, team_abbrev=team_b)
+        # Rank from BASELINE metrics + GS adjustment (avoids double-counting)
+        team_a_rank_after, team_a_context = self.predict_team_rank_with_context(
+            team_a_metrics_before, team_abbrev=team_a, score_adjustment=team_a_gs_adj)
+        team_b_rank_after, team_b_context = self.predict_team_rank_with_context(
+            team_b_metrics_before, team_abbrev=team_b, score_adjustment=team_b_gs_adj)
         
         # Calculate percentiles for before/after metrics (relative to current season)
         team_a_pct_before = self._calculate_metric_percentiles(team_a_metrics_before)
