@@ -110,7 +110,7 @@ def run_standings_model():
         model = load_standings_model(data_version)
         simulator = load_roster_simulator(model, _data_version=data_version)
     
-    tab1, tab2, tab3, tab4 = st.tabs(["Team Analysis", "Player Comparison", "YoY Tracker", "Trade Simulator"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Team Analysis", "Player Comparison", "Player Risers & Fallers", "Trade Simulator"])
     
     with tab1:
         show_standings_team_analysis(model)
@@ -938,17 +938,17 @@ def show_player_comparison():
         # Calculate position-based percentiles (F vs D) with support for inverted metrics
         def get_player_percentiles(player_row, season, metrics):
             pos = player_row.get('pos_group', 'F')
-            season_df = player_df_5on5[
-                (player_df_5on5['season'] == season) & (player_df_5on5['pos_group'] == pos)
-            ]
+            all_skaters = player_df_5on5[player_df_5on5['season'] == season]
+            pos_peers = all_skaters[all_skaters['pos_group'] == pos]
             percentiles = {}
             for metric_key in metrics:
-                if metric_key in season_df.columns and metric_key in player_row.index:
+                peers = all_skaters if metric_key == 'gameScore' else pos_peers
+                if metric_key in peers.columns and metric_key in player_row.index:
                     val = player_row[metric_key]
                     if PLAYER_METRICS[metric_key].get('inverted'):
-                        pct = (season_df[metric_key] > val).mean() * 100
+                        pct = (peers[metric_key] > val).mean() * 100
                     else:
-                        pct = (season_df[metric_key] < val).mean() * 100
+                        pct = (peers[metric_key] < val).mean() * 100
                     percentiles[metric_key] = pct
             return percentiles, pos
         
@@ -966,12 +966,23 @@ def show_player_comparison():
         st.markdown("---")
         
         # Compact player comparison cards
+        def calc_toi_gp(row):
+            gp = int(row.get('games_played', 0))
+            icetime = float(row.get('icetime', 0))
+            if gp > 0:
+                avg_min = icetime / 60 / gp
+                mm = int(avg_min)
+                ss = int(round((avg_min - mm) * 60))
+                return f"{mm}:{ss:02d}"
+            return "—"
+
         p1_gp = int(p1_all_row['games_played'])
         p1_pts = int(p1_all_row.get('I_F_points', 0))
         p1_g = int(p1_all_row.get('I_F_goals', 0))
-        p1_a = p1_pts - p1_g  # Assists = Points - Goals
+        p1_a = p1_pts - p1_g
         p1_hits = int(p1_all_row.get('I_F_hits', 0))
         p1_blk = int(p1_all_row.get('shotsBlockedByPlayer', 0))
+        p1_toi = calc_toi_gp(p1_all_row)
         
         p2_gp = int(p2_all_row['games_played'])
         p2_pts = int(p2_all_row.get('I_F_points', 0))
@@ -979,6 +990,7 @@ def show_player_comparison():
         p2_a = p2_pts - p2_g
         p2_hits = int(p2_all_row.get('I_F_hits', 0))
         p2_blk = int(p2_all_row.get('shotsBlockedByPlayer', 0))
+        p2_toi = calc_toi_gp(p2_all_row)
         
         st.markdown(f"""
         <div style="display: flex; gap: 20px; margin-bottom: 20px;">
@@ -992,6 +1004,7 @@ def show_player_comparison():
                     <div><span style="font-size: 1.4em; font-weight: bold;">{p1_pts}</span> <span style="color: gray;">PTS</span></div>
                     <div><span style="font-size: 1.4em; font-weight: bold;">{p1_hits}</span> <span style="color: gray;">HIT</span></div>
                     <div><span style="font-size: 1.4em; font-weight: bold;">{p1_blk}</span> <span style="color: gray;">BLK</span></div>
+                    <div><span style="font-size: 1.4em; font-weight: bold;">{p1_toi}</span> <span style="color: gray;">TOI/GP</span></div>
                 </div>
             </div>
             <div style="flex: 1; padding: 15px; background: rgba(69, 123, 157, 0.15); border-radius: 10px; border-left: 4px solid #457B9D;">
@@ -1004,6 +1017,7 @@ def show_player_comparison():
                     <div><span style="font-size: 1.4em; font-weight: bold;">{p2_pts}</span> <span style="color: gray;">PTS</span></div>
                     <div><span style="font-size: 1.4em; font-weight: bold;">{p2_hits}</span> <span style="color: gray;">HIT</span></div>
                     <div><span style="font-size: 1.4em; font-weight: bold;">{p2_blk}</span> <span style="color: gray;">BLK</span></div>
+                    <div><span style="font-size: 1.4em; font-weight: bold;">{p2_toi}</span> <span style="color: gray;">TOI/GP</span></div>
                 </div>
             </div>
         </div>
@@ -1302,19 +1316,32 @@ def show_yoy_tracker():
 
     try:
         player_df_5on5 = load_player_data()
+        player_df_all = load_player_data_all()
     except FileNotFoundError as e:
         st.error(f"Player data not found. Run the data pipeline first: {e}")
         return
 
     player_df_5on5 = player_df_5on5[player_df_5on5['games_played'] >= 20].copy()
 
-    COMPOSITE_METRICS = {
-        'gameScore': 0.30,
-        'I_F_xGoals_per60': 0.20,
-        'I_F_points_per60': 0.20,
-        'onIce_xGoalsPercentage': 0.20,
-        'onIce_corsiPercentage': 0.10,
-    }
+    # --- Composite methodology (preserved for potential revert) ---
+    # COMPOSITE_METRICS = {
+    #     'gameScore': 0.30,
+    #     'I_F_xGoals_per60': 0.20,
+    #     'I_F_points_per60': 0.20,
+    #     'onIce_xGoalsPercentage': 0.20,
+    #     'onIce_corsiPercentage': 0.10,
+    # }
+    # def compute_composite(percentiles):
+    #     score = 0.0
+    #     total_weight = 0.0
+    #     for k in composite_keys:
+    #         if k in percentiles:
+    #             score += percentiles[k] * COMPOSITE_METRICS[k]
+    #             total_weight += COMPOSITE_METRICS[k]
+    #     if total_weight > 0:
+    #         return score / total_weight
+    #     return 50.0
+    # --- End composite methodology ---
 
     ALL_DISPLAY_METRICS = {
         'gameScore': {'name': 'Game Score', 'inverted': False, 'fmt': '.2f'},
@@ -1343,7 +1370,6 @@ def show_yoy_tracker():
     )
 
     metric_keys = [k for k in ALL_DISPLAY_METRICS.keys() if k in player_df_5on5.columns]
-    composite_keys = [k for k in COMPOSITE_METRICS.keys() if k in player_df_5on5.columns]
 
     def get_percentile(val, series, inverted=False):
         if inverted:
@@ -1351,25 +1377,14 @@ def show_yoy_tracker():
         return float((series < val).mean() * 100)
 
     def compute_player_percentiles(player_row, season, pos_group):
-        peers = player_df_5on5[
-            (player_df_5on5['season'] == season) & (player_df_5on5['pos_group'] == pos_group)
-        ]
+        all_skaters = player_df_5on5[player_df_5on5['season'] == season]
+        pos_peers = all_skaters[all_skaters['pos_group'] == pos_group]
         pcts = {}
         for k in metric_keys:
+            peers = all_skaters if k == 'gameScore' else pos_peers
             if k in player_row.index and k in peers.columns:
                 pcts[k] = get_percentile(player_row[k], peers[k], ALL_DISPLAY_METRICS[k].get('inverted', False))
         return pcts
-
-    def compute_composite(percentiles):
-        score = 0.0
-        total_weight = 0.0
-        for k in composite_keys:
-            if k in percentiles:
-                score += percentiles[k] * COMPOSITE_METRICS[k]
-                total_weight += COMPOSITE_METRICS[k]
-        if total_weight > 0:
-            return score / total_weight
-        return 50.0
 
     def format_raw(metric_key, val):
         fmt = ALL_DISPLAY_METRICS[metric_key].get('fmt', '.2f')
@@ -1425,9 +1440,9 @@ def show_yoy_tracker():
         cur_pcts = compute_player_percentiles(cur_row, selected_season, pos_group)
         pri_pcts = compute_player_percentiles(pri_row, prior_season, pos_group)
 
-        cur_composite = compute_composite(cur_pcts)
-        pri_composite = compute_composite(pri_pcts)
-        delta = cur_composite - pri_composite
+        cur_gs_pct = cur_pcts.get('gameScore', 50)
+        pri_gs_pct = pri_pcts.get('gameScore', 50)
+        gs_delta = cur_gs_pct - pri_gs_pct
 
         team_changed = cur_row['team'] != pri_row['team']
 
@@ -1441,16 +1456,18 @@ def show_yoy_tracker():
             'team_changed': team_changed,
             'gp_current': int(cur_row['games_played']),
             'gp_prior': int(pri_row['games_played']),
-            'composite_current': cur_composite,
-            'composite_prior': pri_composite,
-            'composite_delta': delta,
+            'gs_pct_current': cur_gs_pct,
+            'gs_pct_prior': pri_gs_pct,
+            'gs_raw_current': float(cur_row['gameScore']),
+            'gs_raw_prior': float(pri_row['gameScore']),
+            'gs_delta': gs_delta,
             'pcts_current': cur_pcts,
             'pcts_prior': pri_pcts,
             'raw_current': {k: float(cur_row[k]) for k in metric_keys if k in cur_row.index},
             'raw_prior': {k: float(pri_row[k]) for k in metric_keys if k in pri_row.index},
         })
 
-    yoy_df = pd.DataFrame(yoy_rows).sort_values('composite_delta', ascending=False)
+    yoy_df = pd.DataFrame(yoy_rows).sort_values('gs_delta', ascending=False)
 
     st.markdown("---")
 
@@ -1463,22 +1480,22 @@ def show_yoy_tracker():
         st.subheader(f"Top {top_n} Risers")
         for _, row in risers.iterrows():
             team_note = f" *(from {row['team_prior']})*" if row['team_changed'] else ""
-            delta_str = f"+{row['composite_delta']:.1f}"
+            delta_str = f"+{row['gs_delta']:.1f}"
             st.markdown(
                 f"**{row['name']}** — {row['team_current']}{team_note} "
                 f"<span style='color:#2A9D8F; font-weight:bold;'>{delta_str}</span> "
-                f"<span style='color:gray;'>({row['composite_prior']:.1f} → {row['composite_current']:.1f})</span>",
+                f"<span style='color:gray;'>({row['gs_raw_prior']:.2f} → {row['gs_raw_current']:.2f})</span>",
                 unsafe_allow_html=True
             )
     with col_fall:
         st.subheader(f"Top {top_n} Fallers")
         for _, row in fallers.iterrows():
             team_note = f" *(from {row['team_prior']})*" if row['team_changed'] else ""
-            delta_str = f"{row['composite_delta']:.1f}"
+            delta_str = f"{row['gs_delta']:.1f}"
             st.markdown(
                 f"**{row['name']}** — {row['team_current']}{team_note} "
                 f"<span style='color:#E63946; font-weight:bold;'>{delta_str}</span> "
-                f"<span style='color:gray;'>({row['composite_prior']:.1f} → {row['composite_current']:.1f})</span>",
+                f"<span style='color:gray;'>({row['gs_raw_prior']:.2f} → {row['gs_raw_current']:.2f})</span>",
                 unsafe_allow_html=True
             )
 
@@ -1497,12 +1514,14 @@ def show_yoy_tracker():
             'Pos': row['position'],
             'Team': team_str,
             'GP': f"{row['gp_prior']} → {row['gp_current']}",
-            'Composite': f"{row['composite_prior']:.1f} → {row['composite_current']:.1f}",
-            'YoY Δ': round(row['composite_delta'], 1),
+            'Game Score': f"{row['gs_raw_prior']:.2f} → {row['gs_raw_current']:.2f}",
+            'GS Pctl': f"{row['gs_pct_prior']:.0f} → {row['gs_pct_current']:.0f}",
+            'GS YoY Δ': round(row['gs_delta'], 1),
         }
         sk = {
-            'Composite': row['composite_current'],
-            'YoY Δ': row['composite_delta'],
+            'Game Score': row['gs_raw_current'],
+            'GS Pctl': row['gs_pct_current'],
+            'GS YoY Δ': row['gs_delta'],
         }
         for k in metric_keys:
             name = ALL_DISPLAY_METRICS[k]['name']
@@ -1518,7 +1537,7 @@ def show_yoy_tracker():
     table_df = pd.DataFrame(table_rows)
     sort_df = pd.DataFrame(sort_keys)
 
-    sortable_cols = ['YoY Δ', 'Composite'] + [ALL_DISPLAY_METRICS[k]['name'] for k in metric_keys]
+    sortable_cols = ['GS YoY Δ', 'Game Score', 'GS Pctl'] + [ALL_DISPLAY_METRICS[k]['name'] for k in metric_keys]
 
     col_sort, col_dir = st.columns([3, 1])
     with col_sort:
@@ -1566,34 +1585,87 @@ def show_yoy_tracker():
     if p['team_changed']:
         team_note = f"  (*Changed teams: {team_label_pri} → {team_label_cur}*)"
 
-    delta_color = "#2A9D8F" if p['composite_delta'] >= 0 else "#E63946"
-    delta_sign = "+" if p['composite_delta'] >= 0 else ""
+    delta_color = "#2A9D8F" if p['gs_delta'] >= 0 else "#E63946"
+    delta_sign = "+" if p['gs_delta'] >= 0 else ""
+    arrow = "▲" if p['gs_delta'] >= 0 else "▼"
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric(f"Composite ({prior_season})", f"{p['composite_prior']:.1f}")
-    with col2:
-        st.metric(f"Composite ({selected_season})", f"{p['composite_current']:.1f}")
-    with col3:
-        st.metric(
-            "YoY Change",
-            f"{delta_sign}{p['composite_delta']:.1f}",
-            delta=f"{delta_sign}{p['composite_delta']:.1f}",
-            delta_color="normal"
+    team_change_html = ""
+    if p['team_changed']:
+        team_change_html = (
+            f"<div style='margin-top:12px; padding:8px 12px; background:rgba(69,123,157,0.15); "
+            f"border-radius:6px; font-size:0.85em;'>"
+            f"📍 {team_label_pri} ({prior_season}) → {team_label_cur} ({selected_season})</div>"
         )
 
-    if p['team_changed']:
-        st.info(f"**Team change:** {team_label_pri} ({prior_season}) → {team_label_cur} ({selected_season})")
+    st.markdown(f"""
+    <div style="display:flex; gap:16px; margin:8px 0 12px 0;">
+        <div style="flex:1; padding:16px 20px; background:rgba(255,255,255,0.05); border-radius:10px; border-left:4px solid #457B9D;">
+            <div style="color:gray; font-size:0.75em; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:6px;">Game Score</div>
+            <div style="font-size:1.6em; font-weight:bold;">{p['gs_raw_prior']:.2f} <span style="color:gray; font-size:0.6em;">→</span> {p['gs_raw_current']:.2f}</div>
+        </div>
+        <div style="flex:1; padding:16px 20px; background:rgba(255,255,255,0.05); border-radius:10px; border-left:4px solid #457B9D;">
+            <div style="color:gray; font-size:0.75em; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:6px;">Percentile (vs. All Skaters)</div>
+            <div style="font-size:1.6em; font-weight:bold;">{p['gs_pct_prior']:.0f}th <span style="color:gray; font-size:0.6em;">→</span> {p['gs_pct_current']:.0f}th</div>
+        </div>
+        <div style="flex:0.7; padding:16px 20px; background:rgba(255,255,255,0.05); border-radius:10px; border-left:4px solid {delta_color};">
+            <div style="color:gray; font-size:0.75em; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:6px;">GS YoY Δ</div>
+            <div style="font-size:1.6em; font-weight:bold; color:{delta_color};">{arrow} {delta_sign}{p['gs_delta']:.1f}</div>
+        </div>
+    </div>{team_change_html}
+    """, unsafe_allow_html=True)
 
-    st.caption(
-        f"*GP: {p['gp_prior']} ({prior_season}) → {p['gp_current']} ({selected_season}) · "
-        f"Position: {p['position']} · Percentiles vs. {'Forwards' if p['pos_group'] == 'F' else 'Defensemen'}*"
-    )
+    pid = p['playerId']
+    all_cur = player_df_all[(player_df_all['playerId'] == pid) & (player_df_all['season'] == selected_season)]
+    all_pri = player_df_all[(player_df_all['playerId'] == pid) & (player_df_all['season'] == prior_season)]
+
+    def extract_stats(row):
+        gp = int(row.get('games_played', 0))
+        g = int(row.get('I_F_goals', 0))
+        pts = int(row.get('I_F_points', 0))
+        a = pts - g
+        hits = int(row.get('I_F_hits', 0))
+        blk = int(row.get('shotsBlockedByPlayer', 0))
+        icetime = float(row.get('icetime', 0))
+        if gp > 0:
+            avg_min = icetime / 60 / gp
+            mm = int(avg_min)
+            ss = int(round((avg_min - mm) * 60))
+            toi_gp = f"{mm}:{ss:02d}"
+        else:
+            toi_gp = "—"
+        return {'GP': gp, 'G': g, 'A': a, 'PTS': pts, 'HIT': hits, 'BLK': blk, 'TOI/GP': toi_gp}
+
+    stat_rows = []
+    if not all_pri.empty:
+        s = extract_stats(all_pri.iloc[0])
+        s['Season'] = f"{prior_season} ({team_label_pri})"
+        stat_rows.append(s)
+    if not all_cur.empty:
+        s = extract_stats(all_cur.iloc[0])
+        s['Season'] = f"{selected_season} ({team_label_cur})"
+        stat_rows.append(s)
+
+    if stat_rows:
+        cols = ['GP', 'G', 'A', 'PTS', 'HIT', 'BLK', 'TOI/GP']
+        header = "".join(f"<th style='padding:6px 14px; text-align:center; color:gray; font-weight:600; font-size:0.8em; letter-spacing:0.05em;'>{c}</th>" for c in cols)
+        rows_html = ""
+        for s in stat_rows:
+            cells = "".join(f"<td style='padding:8px 14px; text-align:center; font-size:1.1em; font-weight:bold;'>{s[c]}</td>" for c in cols)
+            rows_html += f"<tr><td style='padding:8px 14px; font-weight:600; white-space:nowrap;'>{s['Season']}</td>{cells}</tr>"
+        st.markdown(
+            f"<table style='border-collapse:collapse; margin:8px 0;'>"
+            f"<thead><tr><th style='padding:6px 14px; text-align:left; color:gray; font-weight:600; font-size:0.8em;'>Season</th>{header}</tr></thead>"
+            f"<tbody>{rows_html}</tbody></table>",
+            unsafe_allow_html=True,
+        )
 
     st.markdown("---")
 
     st.markdown("**Performance Radar**")
-    st.caption(f"*{selected_player} — {prior_season} vs {selected_season}*")
+    st.caption(
+        f"*{selected_player} — {prior_season} vs {selected_season} · "
+        f"Position: {p['position']} · Game Score vs. all skaters · Other metrics vs. {'forwards' if p['pos_group'] == 'F' else 'defensemen'}*"
+    )
 
     display_names = [ALL_DISPLAY_METRICS[k]['name'] for k in metric_keys]
     pri_values = [p['pcts_prior'].get(k, 50) for k in metric_keys]
@@ -1698,28 +1770,21 @@ def show_yoy_tracker():
 
     st.plotly_chart(fig, use_container_width=True)
 
-    with st.expander("How is the Composite Score calculated?"):
+    with st.expander("How is the YoY ranking calculated?"):
         st.markdown("""
-The **Composite Score** is a single number (0–100) representing a player's overall performance
-relative to their position group (Forwards or Defensemen). It's a weighted average of
-position-adjusted percentiles across 5 metrics:
+The **YoY ranking** uses **Game Score** — a single-number composite game impact rating
+already built into the MoneyPuck data. It captures goals, assists, shot generation,
+defensive contributions, and penalty differential in one metric.
 
-| Category | Metric | Weight |
-|----------|--------|--------|
-| Overall | Game Score | 30% |
-| Offense | xGoals/60 | 20% |
-| Offense | Points/60 | 20% |
-| Two-Way | On-Ice xG% | 20% |
-| Two-Way | On-Ice Corsi% | 10% |
+**How it works:**
+1. Each player's Game Score is converted to a **percentile vs. all skaters** in that season
+   (not split by position — forwards and defensemen are ranked together).
+2. The **GS YoY Δ** is simply the change in that percentile from the prior season to the current season.
+3. A positive Δ means the player improved relative to the league; negative means regression.
 
-**Interpretation:** A composite of 70 means the player's weighted overall performance
-is at the 70th percentile among their position group. A YoY change of +15 means they
-jumped 15 percentile points in aggregate — a major breakout.
-
-*Metrics excluded from the composite: HD Shots/60 (redundant with xGoals/60, penalizes
-playmakers), Hits/60 and TA/GA Ratio (penalize high-skill puck carriers), On-Ice xGA/60
-and On-Ice HDA/60 (heavily team-dependent). These are still shown in the breakdown table,
-radar chart, and main league table for full context.*
+**Interpretation:** A player at the 85th percentile with a GS YoY Δ of +20 went from roughly
+the 65th percentile to the 85th — a significant breakout. The radar chart and table still
+show all 10 detailed metrics for deeper context.
         """)
 
 
