@@ -158,7 +158,7 @@ def show_standings_team_analysis(model):
         st.metric("Predicted Rank", analysis['predicted_rank'])
     with col3:
         variance = analysis['variance']
-        direction = "BETTER" if variance < 0 else "WORSE"
+        direction = "BETTER" if variance > 0 else "WORSE"
         st.metric("Performance Gap", f"{abs(variance)} spots {direction}")
     
     # Strength and Weakness row
@@ -189,14 +189,14 @@ def show_standings_team_analysis(model):
     weakness_explanation = METRIC_EXPLANATIONS.get(analysis['biggest_weakness'], weakness_name.lower())
     strength_explanation = METRIC_EXPLANATIONS.get(analysis['biggest_strength'], strength_name.lower())
     
-    if variance > 3:
+    if variance < -3:
         # Underperforming - weakness is likely the culprit
         if weakness_pct < 20:
             explanation = f"Poor {weakness_explanation} ({weakness_pct:.0f}th percentile) is dragging down {team}. Despite solid underlying metrics, they're losing games they should be winning."
         else:
             explanation = f"{team} is underperforming their underlying numbers. Bad luck, close losses, or inconsistency may be factors."
         st.warning(f"**Why the gap?** {explanation}")
-    elif variance < -3:
+    elif variance > 3:
         # Overperforming - strength or luck is helping
         if strength_pct > 80:
             explanation = f"Elite {strength_explanation} ({strength_pct:.0f}th percentile) is carrying {team}. They're winning more than expected based on overall play."

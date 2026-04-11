@@ -100,7 +100,7 @@ class StandingsModel:
         
         df_results = df_results.sort_values(by=['season', 'predicted_rank'])
         df_results['predicted_rank_placement'] = df_results.groupby('season').cumcount() + 1
-        df_results['ranking_variance'] = df_results['team_rank'] - df_results['predicted_rank_placement']
+        df_results['ranking_variance'] = df_results['predicted_rank_placement'] - df_results['team_rank']
         
         # Add analytical columns for model metrics
         for metric in self.metrics_list:
