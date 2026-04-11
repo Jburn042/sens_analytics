@@ -1538,12 +1538,36 @@ def show_yoy_tracker():
     sort_df = pd.DataFrame(sort_keys)
 
     sortable_cols = ['GS YoY Δ', 'Game Score', 'GS Pctl'] + [ALL_DISPLAY_METRICS[k]['name'] for k in metric_keys]
+    TEAM_FULL_NAMES = {
+        'ANA': 'Anaheim Ducks', 'ARI': 'Arizona Coyotes', 'BOS': 'Boston Bruins',
+        'BUF': 'Buffalo Sabres', 'CAR': 'Carolina Hurricanes', 'CBJ': 'Columbus Blue Jackets',
+        'CGY': 'Calgary Flames', 'CHI': 'Chicago Blackhawks', 'COL': 'Colorado Avalanche',
+        'DAL': 'Dallas Stars', 'DET': 'Detroit Red Wings', 'EDM': 'Edmonton Oilers',
+        'FLA': 'Florida Panthers', 'LAK': 'Los Angeles Kings', 'MIN': 'Minnesota Wild',
+        'MTL': 'Montreal Canadiens', 'NJD': 'New Jersey Devils', 'NSH': 'Nashville Predators',
+        'NYI': 'New York Islanders', 'NYR': 'New York Rangers', 'OTT': 'Ottawa Senators',
+        'PHI': 'Philadelphia Flyers', 'PIT': 'Pittsburgh Penguins', 'SEA': 'Seattle Kraken',
+        'SJS': 'San Jose Sharks', 'STL': 'St. Louis Blues', 'TBL': 'Tampa Bay Lightning',
+        'TOR': 'Toronto Maple Leafs', 'UTA': 'Utah Hockey Club', 'VAN': 'Vancouver Canucks',
+        'VGK': 'Vegas Golden Knights', 'WPG': 'Winnipeg Jets', 'WSH': 'Washington Capitals',
+    }
+    abbrevs = sorted(yoy_df['team_current'].unique().tolist())
+    team_options = ['All'] + [TEAM_FULL_NAMES.get(a, a) for a in abbrevs]
+    abbrev_lookup = {TEAM_FULL_NAMES.get(a, a): a for a in abbrevs}
 
-    col_sort, col_dir = st.columns([3, 1])
+    col_sort, col_dir, col_team = st.columns([3, 1, 2])
     with col_sort:
         sort_col = st.selectbox("Sort by", sortable_cols, index=0, key='yoy_sort_col')
     with col_dir:
         sort_dir = st.selectbox("Order", ["Descending", "Ascending"], key='yoy_sort_dir')
+    with col_team:
+        team_filter = st.selectbox("Team", team_options, index=0, key='yoy_team_filter')
+
+    if team_filter != 'All':
+        abbrev = abbrev_lookup[team_filter]
+        mask = table_df['Team'].str.startswith(abbrev)
+        table_df = table_df[mask]
+        sort_df = sort_df[mask]
 
     ascending = sort_dir == "Ascending"
     sort_order = sort_df[sort_col].sort_values(ascending=ascending).index
@@ -1633,7 +1657,8 @@ def show_yoy_tracker():
             toi_gp = f"{mm}:{ss:02d}"
         else:
             toi_gp = "—"
-        return {'GP': gp, 'G': g, 'A': a, 'PTS': pts, 'HIT': hits, 'BLK': blk, 'TOI/GP': toi_gp}
+        pts_gp = f"{pts / gp:.2f}" if gp > 0 else "—"
+        return {'GP': gp, 'G': g, 'A': a, 'PTS': pts, 'PTS/GP': pts_gp, 'HIT': hits, 'BLK': blk, 'TOI/GP': toi_gp}
 
     stat_rows = []
     if not all_pri.empty:
@@ -1646,7 +1671,7 @@ def show_yoy_tracker():
         stat_rows.append(s)
 
     if stat_rows:
-        cols = ['GP', 'G', 'A', 'PTS', 'HIT', 'BLK', 'TOI/GP']
+        cols = ['GP', 'G', 'A', 'PTS', 'PTS/GP', 'HIT', 'BLK', 'TOI/GP']
         header = "".join(f"<th style='padding:6px 14px; text-align:center; color:gray; font-weight:600; font-size:0.8em; letter-spacing:0.05em;'>{c}</th>" for c in cols)
         rows_html = ""
         for s in stat_rows:
