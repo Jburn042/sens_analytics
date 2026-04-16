@@ -493,7 +493,7 @@ def show_standings_team_analysis(model):
                     max_value=100,
                     value=current_pctl,
                     step=1,
-                    key=f'whatif_slider_{i}_{selected}'
+                    key=f'whatif_slider_{i}_{selected}_{team}'
                 )
             
             with col_remove:
@@ -1537,7 +1537,7 @@ def show_yoy_tracker():
     table_df = pd.DataFrame(table_rows)
     sort_df = pd.DataFrame(sort_keys)
 
-    sortable_cols = ['GS YoY Δ', 'Game Score', 'GS Pctl'] + [ALL_DISPLAY_METRICS[k]['name'] for k in metric_keys]
+    sortable_cols = ['GS YoY Δ', 'Game Score', 'GS Pctl'] + [ALL_DISPLAY_METRICS[k]['name'] for k in metric_keys if k != 'gameScore']
     TEAM_FULL_NAMES = {
         'ANA': 'Anaheim Ducks', 'ARI': 'Arizona Coyotes', 'BOS': 'Boston Bruins',
         'BUF': 'Buffalo Sabres', 'CAR': 'Carolina Hurricanes', 'CBJ': 'Columbus Blue Jackets',
